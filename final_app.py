@@ -103,16 +103,48 @@ def decode_wkb_linestring(hex_wkb: str) -> list:
     except Exception:
         return []
 
+import re
+
 # ─────────────────────────────────────────────
-# 4. GEOCODER
+# 4. SMART LOCATION RESOLVER
+# Accepts:  "19.076, 72.877"  |  "19.076 72.877"  |  "Andheri, Mumbai"  |  area name
 # ─────────────────────────────────────────────
+def resolve_location(query: str, accident_df: pd.DataFrame):
+    """
+    Returns (lat, lon, label) or None.
+    Priority: lat/lng pair → area/location match in DB → Nominatim geocode
+    """
+    query = query.strip()
+
+    # ── 1. Try to parse as lat/lng (e.g. "19.076, 72.877" or "19.076 72.877") ──
+    lat_lng_pattern = re.compile(
+        r'^([+-]?\d{1,3}(?:\.\d+)?)\s*[,\s]\s*([+-]?\d{1,3}(?:\.\d+)?)$'
+    )
+    m = lat_lng_pattern.match(query)
+    if m:
+        lat, lon = float(m.group(1)), float(m.group(2))
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon, f"📍 {lat:.5f}, {lon:.5f}"
+
+    # ── 2. Try matching area / location name in the accident DB ──
+    q_lower = query.lower()
+    for _, row in accident_df.iterrows():
+        area = str(row.get("area", "")).lower()
+        loc  = str(row.get("location", "")).lower()
+        city = str(row.get("city", "")).lower()
+        if q_lower in area or q_lower in loc or q_lower in city:
+            return float(row["latitude"]), float(row["longitude"]), f"📌 {row.get('area','')} — {row.get('location','')}"
+
+    # ── 3. Fall back to Nominatim geocoding (handles full address / place names) ──
+    return geocode_location(query)
+
 @st.cache_data(ttl=600, show_spinner="Geocoding location...")
 def geocode_location(address: str):
     try:
         geolocator = Nominatim(user_agent="road_risk_navigator_v2", timeout=10)
         result = geolocator.geocode(address)
         if result:
-            return result.latitude, result.longitude
+            return result.latitude, result.longitude, f"🌐 {result.address[:60]}"
         return None
     except Exception as e:
         st.warning(f"Geocoding error: {e}")
@@ -256,22 +288,13 @@ const SHOW_CAR = {show_car_js};
 const APPROACH_R = 500;
 const ENTER_R    = 120;
 
-// ── MAP INIT ──────────────────────────────────
+// ── MAP INIT ─────────────────────────────────
+// preferCanvas MUST be false — it breaks divIcon (causes ghost/duplicate car)
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
-
-// ── 5 BASE MAP TILE LAYERS (matching layer control image) ─────────────────
-const baseLayers = {{
-  'dark'     : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',   {{attribution:'&copy; OpenStreetMap &copy; CartoDB', subdomains:'abcd', maxZoom:19}}),
-  'light'    : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',  {{attribution:'&copy; OpenStreetMap &copy; CartoDB', subdomains:'abcd', maxZoom:19}}),
-  'street'   : L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',                {{attribution:'&copy; OpenStreetMap contributors', maxZoom:19}}),
-  'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{attribution:'&copy; Esri', maxZoom:19}}),
-  'topo'     : L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',                  {{attribution:'&copy; OpenStreetMap &copy; OpenTopoMap', subdomains:'abc', maxZoom:17}}),
-}};
-
-// Restore last chosen layer — survives Start/Stop st.rerun()
-const _saved = localStorage.getItem('riskmap_baselayer') || 'dark';
-baseLayers[_saved].addTo(map);
+L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
+}}).addTo(map);
 
 // ── HELPERS ──────────────────────────────────
 function siColor(si) {{
@@ -360,26 +383,11 @@ if (HLIGHT) {{
   map.setView(HLIGHT, 14);
 }}
 
-// ── LAYER CONTROL — 5 base maps + overlays ────
-const _baseMapCtrl = {{
-  '🌑 Dark (CartoDB)'   : baseLayers['dark'],
-  '☀️ Light (CartoDB)'  : baseLayers['light'],
-  '🗺️ Street (OSM)'     : baseLayers['street'],
-  '🛰️ Satellite (Esri)' : baseLayers['satellite'],
-  '🏔️ Topo (OpenTopo)'  : baseLayers['topo'],
-}};
-const _overlayCtrl = {{
-  '🚨 Accident Zones' : zoneLayer,
-  '🛣️ Driver Paths'   : pathLayer,
-}};
-L.control.layers(_baseMapCtrl, _overlayCtrl, {{collapsed:false, position:'topright'}}).addTo(map);
-
-// Save chosen base layer so it persists across st.rerun()
-map.on('baselayerchange', function(e) {{
-  const _map = {{'🌑 Dark (CartoDB)':'dark','☀️ Light (CartoDB)':'light','🗺️ Street (OSM)':'street','🛰️ Satellite (Esri)':'satellite','🏔️ Topo (OpenTopo)':'topo'}};
-  const _k = _map[e.name];
-  if (_k) localStorage.setItem('riskmap_baselayer', _k);
-}});
+// ── LAYER CONTROL ─────────────────────────────
+L.control.layers(null, {{
+  'Accident Zones': zoneLayer,
+  'Driver Paths'  : pathLayer,
+}}, {{collapsed:false}}).addTo(map);
 
 // ── LEGEND ───────────────────────────────────
 const legend = L.control({{position:'bottomright'}});
@@ -398,28 +406,36 @@ legend.addTo(map);
 // ── MOVING CAR SIMULATION ─────────────────────
 if (SHOW_CAR && PATHS.length > 0) {{
 
-  // ── Car icon ──
+  // Count total points across all paths to compute per-step delay for ~30s total
+  const totalPts = PATHS.reduce((s,p) => s + (p.coords ? p.coords.length : 0), 0);
+  const TARGET_MS = 30000; // 30 seconds total journey
+  const BASE_DELAY = totalPts > 0 ? Math.max(50, Math.floor(TARGET_MS / totalPts)) : 200;
+
+  // Single clean car icon — no background div, just emoji with glow
   function makeCarIcon() {{
     return L.divIcon({{
-      className: 'car-icon',
+      className: 'car-icon',   // must be non-empty string to avoid Leaflet adding extra class
       html: `<span style="font-size:22px;line-height:1;display:block;
                           filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
-      iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -14]
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+      popupAnchor: [0, -14]
     }});
   }}
 
+  // Car marker — placed at start, NO trail yet
   const carMarker = L.marker(PATHS[0].coords[0], {{
-    icon: makeCarIcon(), zIndexOffset: 1000
+    icon: makeCarIcon(),
+    zIndexOffset: 1000
   }}).addTo(map);
 
+  // Trail line — empty at start, grows as car moves
   const trailPts  = [];
   const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(map);
 
-  // ── Zone state: null | 'approaching' | 'entered' ──
+  // Per-zone alert state
   const zoneState = {{}};
 
-  // ── checkZones — called immediately after setLatLng so alert fires
-  //    at the exact same render frame the car visually crosses the boundary ──
   function checkZones(lat, lng) {{
     ZONES.forEach(z => {{
       const dist      = haversineM(lat, lng, z.lat, z.lng);
@@ -427,7 +443,6 @@ if (SHOW_CAR && PATHS.length > 0) {{
       const riskLevel = z.risk ? z.risk.toUpperCase() : 'RISK';
 
       if (dist <= ENTER_R) {{
-        // ── ENTERED inner zone ──
         if (prev !== 'entered') {{
           zoneState[z.id] = 'entered';
           addAlert(
@@ -437,17 +452,14 @@ if (SHOW_CAR && PATHS.length > 0) {{
           );
         }}
       }} else if (dist <= APPROACH_R) {{
-        // ── APPROACHING outer ring ──
         if (prev === 'entered') {{
-          // Just exited inner zone into approach ring → show safe
-          zoneState[z.id] = 'approaching';
+          zoneState[z.id] = null;
           addAlert(
             `✅ Left ${{riskLevel}} Risk Zone — Safe: ${{z.area}}`,
             `✅ <b>Left ${{riskLevel}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`,
             'left'
           );
-        }} else if (prev === null) {{
-          // First time crossing into approach ring → show approaching
+        }} else if (prev !== 'approaching') {{
           zoneState[z.id] = 'approaching';
           addAlert(
             `⚠️ Approaching ${{riskLevel}} Risk Zone: ${{z.area}} (${{Math.round(dist)}}m)`,
@@ -456,7 +468,6 @@ if (SHOW_CAR && PATHS.length > 0) {{
           );
         }}
       }} else {{
-        // ── FULLY OUTSIDE both rings ──
         if (prev === 'entered') {{
           zoneState[z.id] = null;
           addAlert(
@@ -471,33 +482,11 @@ if (SHOW_CAR && PATHS.length > 0) {{
     }});
   }}
 
-  // ── Interpolate all GPS segments into small fixed-distance sub-steps ──
-  // Each real GPS point can be 100m-500m apart.  By splitting into ~8m steps
-  // and ticking every 80ms the car moves smoothly AND checkZones fires at
-  // precisely the pixel where the car icon crosses each zone boundary.
-  const STEP_M  = 8;   // metres per sub-step  (smaller → more precise sync)
-  const TICK_MS = 80;  // ms per sub-step       (larger  → slower car speed)
-
-  const allCoords = [];
-  PATHS.forEach(p => {{ if (p.coords) allCoords.push(...p.coords); }});
-
-  const interpCoords = [];
-  for (let i = 0; i < allCoords.length - 1; i++) {{
-    const [la1, ln1] = allCoords[i];
-    const [la2, ln2] = allCoords[i + 1];
-    const seg   = haversineM(la1, ln1, la2, ln2);
-    const steps = Math.max(1, Math.round(seg / STEP_M));
-    for (let s = 0; s < steps; s++) {{
-      const t = s / steps;
-      interpCoords.push([la1 + (la2 - la1) * t, ln1 + (ln2 - ln1) * t]);
-    }}
-  }}
-  interpCoords.push(allCoords[allCoords.length - 1]);
-
-  let stepIdx = 0;
+  let pathIdx = 0, ptIdx = 0;
 
   function step() {{
-    if (stepIdx >= interpCoords.length) {{
+    if (pathIdx >= PATHS.length) {{
+      // Simulation done
       carMarker.setIcon(L.divIcon({{
         className: 'car-icon',
         html: `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
@@ -507,31 +496,38 @@ if (SHOW_CAR && PATHS.length > 0) {{
       return;
     }}
 
-    const [lat, lng] = interpCoords[stepIdx];
+    const coords = PATHS[pathIdx].coords;
+    if (ptIdx >= coords.length) {{
+      pathIdx++;
+      ptIdx = 0;
+      if (pathIdx < PATHS.length)
+        addAlert(`🟢 Path #${{PATHS[pathIdx].id}}`, `🟢 <b>Continuing to Path #${{PATHS[pathIdx].id}}</b>`, 'safe');
+      setTimeout(step, BASE_DELAY);
+      return;
+    }}
 
-    // 1. Move car visually
+    const [lat, lng] = coords[ptIdx];
+
+    // Move car
     carMarker.setLatLng([lat, lng]);
-    // 2. Grow trail
+
+    // Grow trail — only from this point onward
     trailPts.push([lat, lng]);
     trailLine.setLatLngs(trailPts);
-    // 3. Pan map to follow
-    if (!map.getBounds().contains([lat, lng]))
-      map.panTo([lat, lng], {{animate:true, duration:0.4, easeLinearity:0.5}});
-    // 4. Fire zone alert — called AFTER setLatLng so car position and
-    //    alert always fire on the exact same step with zero offset
-    checkZones(lat, lng);
 
-    stepIdx++;
-    setTimeout(step, TICK_MS);
+    // Pan map gently to follow car
+    if (!map.getBounds().contains([lat, lng]))
+      map.panTo([lat, lng], {{animate:true, duration:0.5, easeLinearity:0.5}});
+
+    checkZones(lat, lng);
+    ptIdx++;
+    setTimeout(step, BASE_DELAY);
   }}
 
-  map.setView(interpCoords[0], 14);
-  addAlert(
-    `🟢 Simulation started`,
-    `🟢 <b>Simulation started — ${{interpCoords.length}} steps</b>`,
-    'safe'
-  );
-  setTimeout(step, 500);
+  // Zoom to start of path before beginning
+  map.setView(PATHS[0].coords[0], 14);
+  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — Path #${{PATHS[0].id}} | ${{totalPts}} steps | ~30s journey</b>`, 'safe');
+  setTimeout(step, 500); // small delay so map settles before car moves
 }}
 </script>
 </body>
@@ -553,8 +549,11 @@ def alert_box(level: str, text: str):
 # ─────────────────────────────────────────────
 def main():
     # ── Session state init — must be FIRST, before any widget ──
-    if "running" not in st.session_state:
-        st.session_state.running = False
+    if "running"          not in st.session_state: st.session_state.running          = False
+    if "highlight_point"  not in st.session_state: st.session_state.highlight_point  = None
+    if "highlight_label"  not in st.session_state: st.session_state.highlight_label  = ""
+    if "risk_info"        not in st.session_state: st.session_state.risk_info        = None
+    if "search_error"     not in st.session_state: st.session_state.search_error     = ""
 
     # ── Sidebar — widgets only, NO rerun inside ──
     with st.sidebar:
@@ -578,8 +577,19 @@ def main():
         st.divider()
 
         st.subheader("\U0001f4cd Location Search")
-        address_input = st.text_input("Search address / place", placeholder="e.g. Andheri, Mumbai")
-        search_btn    = st.button("\U0001f50d Find & Check Risk", use_container_width=True)
+        st.caption("Enter place name, area, or lat/lng (e.g. 19.076, 72.877)")
+        address_input = st.text_input(
+            "Search location",
+            placeholder="e.g. Andheri | 19.076, 72.877 | Kurla West"
+        )
+        search_btn = st.button("\U0001f50d Find & Check Risk", use_container_width=True)
+        if st.session_state.highlight_point:
+            if st.button("✖ Clear Search", use_container_width=True):
+                st.session_state.highlight_point = None
+                st.session_state.highlight_label = ""
+                st.session_state.risk_info       = None
+                st.session_state.search_error    = ""
+                st.rerun()
 
         st.divider()
 
@@ -595,6 +605,23 @@ def main():
     if stop_btn:
         st.session_state.running = False
         st.rerun()
+
+    # ── Search logic — stores result in session_state WITHOUT rerunning ──
+    # This means the car keeps its current state (running/stopped) unchanged.
+    if search_btn and address_input:
+        accident_df_for_search = load_accident_data()
+        result = resolve_location(address_input.strip(), accident_df_for_search)
+        if result:
+            lat, lon, label = result
+            st.session_state.highlight_point = (lat, lon)
+            st.session_state.highlight_label = label
+            st.session_state.risk_info       = check_risk_at_point(lat, lon, accident_df_for_search, 500)
+            st.session_state.search_error    = ""
+        else:
+            st.session_state.highlight_point = None
+            st.session_state.highlight_label = ""
+            st.session_state.risk_info       = None
+            st.session_state.search_error    = f"Location not found for '{address_input}'. Try a place name, area, or lat/lng."
 
     # ── Load Data ────────────────────────────
     accident_df  = load_accident_data()
@@ -614,23 +641,22 @@ def main():
     k5.metric("Driver Paths",     len(driver_paths))
     st.divider()
 
-    # ── Geocode + Risk Check ──────────────────
-    highlight_point = None
-    if search_btn and address_input:
-        coords = geocode_location(address_input)
-        if coords:
-            highlight_point = coords
-            risk_info = check_risk_at_point(coords[0], coords[1], accident_df, 500)
-            st.subheader("📊 Risk Assessment")
-            alert_box(risk_info["level"], risk_info["message"])
-            if risk_info["zones"]:
-                near_df = pd.DataFrame(risk_info["zones"])[
-                    ["area","location","risk_level","severity_index",
-                     "total_accident","total_fatality","distance_m"]
-                ].sort_values("distance_m")
-                st.dataframe(near_df, use_container_width=True, hide_index=True)
-        else:
-            st.error("Location not found. Try a more specific address.")
+    # ── Risk Assessment display (from session_state — survives all reruns) ──
+    if st.session_state.search_error:
+        st.error(st.session_state.search_error)
+
+    if st.session_state.highlight_point and st.session_state.risk_info:
+        lat, lon = st.session_state.highlight_point
+        st.subheader("📊 Risk Assessment")
+        st.caption(f"**{st.session_state.highlight_label}** — ({lat:.5f}, {lon:.5f})")
+        risk_info = st.session_state.risk_info
+        alert_box(risk_info["level"], risk_info["message"])
+        if risk_info["zones"]:
+            near_df = pd.DataFrame(risk_info["zones"])[
+                ["area","location","risk_level","severity_index",
+                 "total_accident","total_fatality","distance_m"]
+            ].sort_values("distance_m")
+            st.dataframe(near_df, use_container_width=True, hide_index=True)
 
     # ── Map ───────────────────────────────────
     st.subheader("🗺️ Interactive Risk Map  •  🚗 Live Car Simulation")
@@ -644,7 +670,7 @@ def main():
         driver_paths    = display_paths,
         center_lat      = center_lat,
         center_lng      = center_lng,
-        highlight_point = highlight_point,
+        highlight_point = st.session_state.highlight_point,   # ← from session_state
         show_car        = st.session_state.running,
     )
     components.html(map_html, height=700, scrolling=False)
