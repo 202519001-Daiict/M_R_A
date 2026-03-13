@@ -175,8 +175,8 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 <title>Road Risk Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<!-- Leaflet.AnimatedMarker plugin -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-animatedmarker/1.0.0/AnimatedMarker.min.js"></script>
+<!-- leaflet.motion — smooth marker animation along polyline (real unpkg CDN) -->
+<script src="https://unpkg.com/leaflet.motion@0.2.4/dist/leaflet.motion.min.js"></script>
 <style>
   * {{ box-sizing:border-box; margin:0; padding:0; }}
   body, html {{ height:100%; background:#0e1117; font-family:sans-serif; }}
@@ -392,22 +392,14 @@ legend.onAdd = () => {{
 }};
 legend.addTo(map);
 
-// ── MOVING CAR SIMULATION (Leaflet.AnimatedMarker) ───
+// ── MOVING CAR SIMULATION (leaflet.motion) ────
 if (SHOW_CAR && PATHS.length > 0) {{
 
   const totalPts = PATHS.reduce((s,p) => s + (p.coords ? p.coords.length : 0), 0);
 
-  // Car icon
-  function makeCarIcon() {{
-    return L.divIcon({{
-      className: 'car-icon',
-      html: `<span style="font-size:22px;line-height:1;display:block;
-                          filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
-      popupAnchor: [0, -14]
-    }});
-  }}
+  // Flatten all path coords into one continuous route
+  const allCoords = [];
+  PATHS.forEach(p => {{ if (p.coords) allCoords.push(...p.coords); }});
 
   // Trail line — grows as car moves
   const trailPts  = [];
@@ -462,31 +454,32 @@ if (SHOW_CAR && PATHS.length > 0) {{
     }});
   }}
 
-  // Flatten all path coords into one continuous polyline for AnimatedMarker
-  const allCoords = [];
-  PATHS.forEach(p => {{ if (p.coords) allCoords.push(...p.coords); }});
+  // Car icon
+  function makeCarIcon() {{
+    return L.divIcon({{
+      className: 'car-icon',
+      html: `<span style="font-size:22px;line-height:1;display:block;
+                          filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    }});
+  }}
 
-  const animLine = L.polyline(allCoords);
+  // leaflet.motion — animates a marker along a polyline at given speed (km/h)
+  const motionLine = L.motion.polyline(
+    allCoords,
+    {{ color: 'transparent', weight: 0 }},   // invisible guide line
+    {{ auto: false, speed: 60 }},             // 60 km/h playback speed
+    {{ removeOnEnd: false, showMarker: true, icon: makeCarIcon() }}
+  ).addTo(map);
 
-  // Leaflet.AnimatedMarker — moves smoothly along the polyline
-  const animatedCar = L.animatedMarker(animLine.getLatLngs(), {{
-    icon        : makeCarIcon(),
-    distance    : 200,          // px per interval — controls speed
-    interval    : 100,          // ms between steps — smoother = lower value
-    autoStart   : false,
-    onEnd       : function() {{
-      this.setIcon(L.divIcon({{
-        className : 'car-icon',
-        html      : `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
-        iconSize  : [24,24], iconAnchor:[12,12]
-      }}));
-      addAlert('🏁 Destination reached!', '🏁 <b>Simulation complete — Destination reached safely!</b>', 'safe');
-    }}
-  }}).addTo(map);
+  // Update trail + zone alerts on every motion step
+  motionLine.on(L.Motion.Event.MoveStart, function() {{
+    addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — ${{totalPts}} waypoints | leaflet.motion active</b>`, 'safe');
+  }});
 
-  // Hook into AnimatedMarker's move event to update trail + zone checks
-  animatedCar.on('move', function(e) {{
-    const {{ lat, lng }} = e.latlng;
+  motionLine.on(L.Motion.Event.Move, function(e) {{
+    const lat = e.latlng.lat, lng = e.latlng.lng;
     trailPts.push([lat, lng]);
     trailLine.setLatLngs(trailPts);
     if (!map.getBounds().contains([lat, lng]))
@@ -494,10 +487,13 @@ if (SHOW_CAR && PATHS.length > 0) {{
     checkZones(lat, lng);
   }});
 
-  // Zoom to start then begin animation
+  motionLine.on(L.Motion.Event.Ended, function() {{
+    addAlert('🏁 Destination reached!', '🏁 <b>Simulation complete — Destination reached safely!</b>', 'safe');
+  }});
+
+  // Zoom to start then begin
   map.setView(allCoords[0], 14);
-  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — ${{totalPts}} waypoints | Leaflet.AnimatedMarker active</b>`, 'safe');
-  setTimeout(() => animatedCar.start(), 500);
+  setTimeout(() => motionLine.motionStart(), 500);
 }}
 </script>
 </body>
