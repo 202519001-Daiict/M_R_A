@@ -175,6 +175,8 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 <title>Road Risk Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet.AnimatedMarker plugin -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-animatedmarker/1.0.0/AnimatedMarker.min.js"></script>
 <style>
   * {{ box-sizing:border-box; margin:0; padding:0; }}
   body, html {{ height:100%; background:#0e1117; font-family:sans-serif; }}
@@ -260,9 +262,7 @@ const ENTER_R    = 120;
 // preferCanvas MUST be false — it breaks divIcon (causes ghost/duplicate car)
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
-L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
-}}).addTo(map);
+// Base tile layer added via enhanced layer control below
 
 // ── HELPERS ──────────────────────────────────
 function siColor(si) {{
@@ -351,11 +351,32 @@ if (HLIGHT) {{
   map.setView(HLIGHT, 14);
 }}
 
-// ── LAYER CONTROL ─────────────────────────────
-L.control.layers(null, {{
-  'Accident Zones': zoneLayer,
-  'Driver Paths'  : pathLayer,
-}}, {{collapsed:false}}).addTo(map);
+// ── ENHANCED LAYER CONTROL ────────────────────
+// Base map options
+const baseDark = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
+}});
+const baseStreet = L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+  attribution:'© OpenStreetMap contributors', maxZoom:19
+}});
+const baseSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+  attribution:'© Esri World Imagery', maxZoom:19
+}});
+
+// Remove the existing dark tile layer (already added at init) and re-add via control
+map.eachLayer(layer => {{ if (layer instanceof L.TileLayer) map.removeLayer(layer); }});
+baseDark.addTo(map);
+
+const baseMaps = {{
+  '🌑 Dark (CartoDB)'  : baseDark,
+  '🗺️ Street (OSM)'    : baseStreet,
+  '🛰️ Satellite (Esri)': baseSatellite,
+}};
+const overlayMaps = {{
+  '🚨 Accident Zones': zoneLayer,
+  '🛣️ Driver Paths'  : pathLayer,
+}};
+L.control.layers(baseMaps, overlayMaps, {{collapsed:false, position:'topright'}}).addTo(map);
 
 // ── LEGEND ───────────────────────────────────
 const legend = L.control({{position:'bottomright'}});
@@ -371,18 +392,15 @@ legend.onAdd = () => {{
 }};
 legend.addTo(map);
 
-// ── MOVING CAR SIMULATION ─────────────────────
+// ── MOVING CAR SIMULATION (Leaflet.AnimatedMarker) ───
 if (SHOW_CAR && PATHS.length > 0) {{
 
-  // Count total points across all paths to compute per-step delay for ~30s total
   const totalPts = PATHS.reduce((s,p) => s + (p.coords ? p.coords.length : 0), 0);
-  const TARGET_MS = 30000; // 30 seconds total journey
-  const BASE_DELAY = totalPts > 0 ? Math.max(50, Math.floor(TARGET_MS / totalPts)) : 200;
 
-  // Single clean car icon — no background div, just emoji with glow
+  // Car icon
   function makeCarIcon() {{
     return L.divIcon({{
-      className: 'car-icon',   // must be non-empty string to avoid Leaflet adding extra class
+      className: 'car-icon',
       html: `<span style="font-size:22px;line-height:1;display:block;
                           filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
       iconSize: [24, 24],
@@ -391,17 +409,11 @@ if (SHOW_CAR && PATHS.length > 0) {{
     }});
   }}
 
-  // Car marker — placed at start, NO trail yet
-  const carMarker = L.marker(PATHS[0].coords[0], {{
-    icon: makeCarIcon(),
-    zIndexOffset: 1000
-  }}).addTo(map);
-
-  // Trail line — empty at start, grows as car moves
+  // Trail line — grows as car moves
   const trailPts  = [];
   const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(map);
 
-  // Per-zone alert state
+  // Zone alert state
   const zoneState = {{}};
 
   function checkZones(lat, lng) {{
@@ -450,52 +462,42 @@ if (SHOW_CAR && PATHS.length > 0) {{
     }});
   }}
 
-  let pathIdx = 0, ptIdx = 0;
+  // Flatten all path coords into one continuous polyline for AnimatedMarker
+  const allCoords = [];
+  PATHS.forEach(p => {{ if (p.coords) allCoords.push(...p.coords); }});
 
-  function step() {{
-    if (pathIdx >= PATHS.length) {{
-      // Simulation done
-      carMarker.setIcon(L.divIcon({{
-        className: 'car-icon',
-        html: `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
-        iconSize:[24,24], iconAnchor:[12,12]
+  const animLine = L.polyline(allCoords);
+
+  // Leaflet.AnimatedMarker — moves smoothly along the polyline
+  const animatedCar = L.animatedMarker(animLine.getLatLngs(), {{
+    icon        : makeCarIcon(),
+    distance    : 200,          // px per interval — controls speed
+    interval    : 100,          // ms between steps — smoother = lower value
+    autoStart   : false,
+    onEnd       : function() {{
+      this.setIcon(L.divIcon({{
+        className : 'car-icon',
+        html      : `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
+        iconSize  : [24,24], iconAnchor:[12,12]
       }}));
       addAlert('🏁 Destination reached!', '🏁 <b>Simulation complete — Destination reached safely!</b>', 'safe');
-      return;
     }}
+  }}).addTo(map);
 
-    const coords = PATHS[pathIdx].coords;
-    if (ptIdx >= coords.length) {{
-      pathIdx++;
-      ptIdx = 0;
-      if (pathIdx < PATHS.length)
-        addAlert(`🟢 Path #${{PATHS[pathIdx].id}}`, `🟢 <b>Continuing to Path #${{PATHS[pathIdx].id}}</b>`, 'safe');
-      setTimeout(step, BASE_DELAY);
-      return;
-    }}
-
-    const [lat, lng] = coords[ptIdx];
-
-    // Move car
-    carMarker.setLatLng([lat, lng]);
-
-    // Grow trail — only from this point onward
+  // Hook into AnimatedMarker's move event to update trail + zone checks
+  animatedCar.on('move', function(e) {{
+    const {{ lat, lng }} = e.latlng;
     trailPts.push([lat, lng]);
     trailLine.setLatLngs(trailPts);
-
-    // Pan map gently to follow car
     if (!map.getBounds().contains([lat, lng]))
       map.panTo([lat, lng], {{animate:true, duration:0.5, easeLinearity:0.5}});
-
     checkZones(lat, lng);
-    ptIdx++;
-    setTimeout(step, BASE_DELAY);
-  }}
+  }});
 
-  // Zoom to start of path before beginning
-  map.setView(PATHS[0].coords[0], 14);
-  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — Path #${{PATHS[0].id}} | ${{totalPts}} steps | ~30s journey</b>`, 'safe');
-  setTimeout(step, 500); // small delay so map settles before car moves
+  // Zoom to start then begin animation
+  map.setView(allCoords[0], 14);
+  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — ${{totalPts}} waypoints | Leaflet.AnimatedMarker active</b>`, 'safe');
+  setTimeout(() => animatedCar.start(), 500);
 }}
 </script>
 </body>
