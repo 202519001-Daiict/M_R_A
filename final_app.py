@@ -3,6 +3,7 @@ Road Accident Risk Navigation Dashboard
 Uses Supabase PostgreSQL + Leaflet.js (moving car + smart zone alerts)
 """
 
+import re
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -103,43 +104,12 @@ def decode_wkb_linestring(hex_wkb: str) -> list:
     except Exception:
         return []
 
-import re
-
 # ─────────────────────────────────────────────
 # 4. SMART LOCATION RESOLVER
-# Accepts:  "19.076, 72.877"  |  "19.076 72.877"  |  "Andheri, Mumbai"  |  area name
+# Handles: "19.076, 72.877" | "Andheri" | "Deonar, Mumbai"
 # ─────────────────────────────────────────────
-def resolve_location(query: str, accident_df: pd.DataFrame):
-    """
-    Returns (lat, lon, label) or None.
-    Priority: lat/lng pair → area/location match in DB → Nominatim geocode
-    """
-    query = query.strip()
-
-    # ── 1. Try to parse as lat/lng (e.g. "19.076, 72.877" or "19.076 72.877") ──
-    lat_lng_pattern = re.compile(
-        r'^([+-]?\d{1,3}(?:\.\d+)?)\s*[,\s]\s*([+-]?\d{1,3}(?:\.\d+)?)$'
-    )
-    m = lat_lng_pattern.match(query)
-    if m:
-        lat, lon = float(m.group(1)), float(m.group(2))
-        if -90 <= lat <= 90 and -180 <= lon <= 180:
-            return lat, lon, f"📍 {lat:.5f}, {lon:.5f}"
-
-    # ── 2. Try matching area / location name in the accident DB ──
-    q_lower = query.lower()
-    for _, row in accident_df.iterrows():
-        area = str(row.get("area", "")).lower()
-        loc  = str(row.get("location", "")).lower()
-        city = str(row.get("city", "")).lower()
-        if q_lower in area or q_lower in loc or q_lower in city:
-            return float(row["latitude"]), float(row["longitude"]), f"📌 {row.get('area','')} — {row.get('location','')}"
-
-    # ── 3. Fall back to Nominatim geocoding (handles full address / place names) ──
-    return geocode_location(query)
-
 @st.cache_data(ttl=600, show_spinner="Geocoding location...")
-def geocode_location(address: str):
+def geocode_nominatim(address: str):
     try:
         geolocator = Nominatim(user_agent="road_risk_navigator_v2", timeout=10)
         result = geolocator.geocode(address)
@@ -149,6 +119,25 @@ def geocode_location(address: str):
     except Exception as e:
         st.warning(f"Geocoding error: {e}")
         return None
+
+def resolve_location(query: str, accident_df: pd.DataFrame):
+    """Returns (lat, lon, label) or None. Priority: lat/lng → DB area match → Nominatim."""
+    query = query.strip()
+    # 1. Parse lat/lng pair
+    m = re.match(r'^([+-]?\d{1,3}(?:\.\d+)?)\s*[,\s]\s*([+-]?\d{1,3}(?:\.\d+)?)$', query)
+    if m:
+        lat, lon = float(m.group(1)), float(m.group(2))
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon, f"📍 {lat:.5f}, {lon:.5f}"
+    # 2. Match area/location/city in accident DB
+    q_low = query.lower()
+    for _, row in accident_df.iterrows():
+        if (q_low in str(row.get("area","")).lower() or
+            q_low in str(row.get("location","")).lower() or
+            q_low in str(row.get("city","")).lower()):
+            return float(row["latitude"]), float(row["longitude"]), f"📌 {row.get('area','')} — {row.get('location','')}"
+    # 3. Nominatim geocoding
+    return geocode_nominatim(query)
 
 # ─────────────────────────────────────────────
 # 5. RISK CHECK FUNCTIONS
@@ -179,6 +168,7 @@ def build_leaflet_map(accident_df: pd.DataFrame,
                        center_lat: float = 19.076,
                        center_lng: float = 72.877,
                        highlight_point=None,
+                       search_query: str = "",
                        show_car: bool = True) -> str:
 
     zones_js = json.dumps([
@@ -188,6 +178,7 @@ def build_leaflet_map(accident_df: pd.DataFrame,
             "lng":  float(r["longitude"]),
             "area": str(r.get("area", "")),
             "loc":  str(r.get("location", "")),
+            "city": str(r.get("city", "")),
             "si":   float(r.get("severity_index", 0)),
             "risk": str(r.get("risk_level", "Low")),
             "ta":   int(r.get("total_accident", 0)),
@@ -196,9 +187,10 @@ def build_leaflet_map(accident_df: pd.DataFrame,
         for _, r in accident_df.iterrows()
     ])
 
-    paths_js     = json.dumps([{"id": p["id"], "coords": p["coordinates"]} for p in driver_paths])
-    highlight_js = json.dumps(list(highlight_point) if highlight_point else None)
-    show_car_js  = "true" if show_car else "false"
+    paths_js      = json.dumps([{"id": p["id"], "coords": p["coordinates"]} for p in driver_paths])
+    highlight_js  = json.dumps(list(highlight_point) if highlight_point else None)
+    search_query_js = json.dumps(search_query.strip().lower())
+    show_car_js   = "true" if show_car else "false"
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -211,9 +203,8 @@ def build_leaflet_map(accident_df: pd.DataFrame,
   * {{ box-sizing:border-box; margin:0; padding:0; }}
   body, html {{ height:100%; background:#0e1117; font-family:sans-serif; }}
   #wrapper {{ display:flex; flex-direction:column; height:100vh; }}
-  #map {{ flex:1; min-height:0; }}
+  #map {{ flex:1; min-height:0; position:relative; }}
 
-  /* ── Single alert bar (one message at a time) ── */
   #alertFeed {{
     background:#0d1117;
     border-top:2px solid #1e90ff33;
@@ -243,7 +234,6 @@ def build_leaflet_map(accident_df: pd.DataFrame,
   #alertMsg.left        {{ background:#0d2a0d; border-left-color:#00c853; }}
   #alertMsg.safe        {{ background:#0d2a0d; border-left-color:#00c853; }}
 
-  /* ── Floating map alert bubble ── */
   #mapAlert {{
     position:absolute;
     top:14px; left:50%; transform:translateX(-50%);
@@ -281,20 +271,28 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 </div>
 
 <script>
-const ZONES    = {zones_js};
-const PATHS    = {paths_js};
-const HLIGHT   = {highlight_js};
-const SHOW_CAR = {show_car_js};
-const APPROACH_R = 500;
-const ENTER_R    = 120;
+const ZONES       = {zones_js};
+const PATHS       = {paths_js};
+const HLIGHT      = {highlight_js};
+const SEARCH_Q    = {search_query_js};
+const SHOW_CAR    = {show_car_js};
+const APPROACH_R  = 500;
+const ENTER_R     = 120;
 
-// ── MAP INIT ─────────────────────────────────
-// preferCanvas MUST be false — it breaks divIcon (causes ghost/duplicate car)
+// ── MAP INIT ──────────────────────────────────
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
-L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
-}}).addTo(map);
+
+// ── 5 BASE MAP TILE LAYERS ────────────────────
+const baseLayers = {{
+  'dark'     : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',   {{attribution:'&copy; OpenStreetMap &copy; CartoDB', subdomains:'abcd', maxZoom:19}}),
+  'light'    : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',  {{attribution:'&copy; OpenStreetMap &copy; CartoDB', subdomains:'abcd', maxZoom:19}}),
+  'street'   : L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',                {{attribution:'&copy; OpenStreetMap contributors', maxZoom:19}}),
+  'satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{attribution:'&copy; Esri', maxZoom:19}}),
+  'topo'     : L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',                  {{attribution:'&copy; OpenStreetMap &copy; OpenTopoMap', subdomains:'abc', maxZoom:17}}),
+}};
+const _saved = localStorage.getItem('riskmap_baselayer') || 'dark';
+baseLayers[_saved].addTo(map);
 
 // ── HELPERS ──────────────────────────────────
 function siColor(si) {{
@@ -310,43 +308,63 @@ function haversineM(lat1,lng1,lat2,lng2) {{
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }}
 let mapAlertTimer = null;
-
 function addAlert(shortMsg, fullMsg, cls) {{
-  // ── Bottom bar: replace current message ──
   const bar = document.getElementById('alertMsg');
   bar.className = cls;
   bar.innerHTML = fullMsg;
-
-  // ── Map floating bubble: short message only ──
   const bubble = document.getElementById('mapAlert');
   bubble.className = 'show ' + (cls==='approaching'?'ap': cls==='entered'?'en':'lft');
   bubble.textContent = shortMsg;
   if (mapAlertTimer) clearTimeout(mapAlertTimer);
-  mapAlertTimer = setTimeout(() => {{
-    bubble.className = '';
-  }}, 4000);
+  mapAlertTimer = setTimeout(() => {{ bubble.className = ''; }}, 4000);
 }}
 
 // ── ACCIDENT ZONES ────────────────────────────
+// Determine which zones match the search query (for highlight/dim effect)
+const hasSearch = SEARCH_Q.length > 0;
+const zoneMatchIds = new Set();
+if (hasSearch) {{
+  ZONES.forEach(z => {{
+    const txt = (z.area + ' ' + z.loc + ' ' + z.city).toLowerCase();
+    if (txt.includes(SEARCH_Q)) zoneMatchIds.add(z.id);
+  }});
+}}
+
 const zoneLayer = L.layerGroup().addTo(map);
+const zoneMarkers = {{}};  // id → {{ outerRing, innerRing, marker }}
+
 ZONES.forEach(z => {{
   const col = siColor(z.si);
-  // Outer approach ring
-  L.circle([z.lat,z.lng], {{
+
+  // Dim non-matching zones when a search is active
+  const isMatch  = !hasSearch || zoneMatchIds.has(z.id);
+  const outerOp  = isMatch ? 0.10 : 0.02;
+  const innerOp  = isMatch ? 0.28 : 0.04;
+  const markerOp = isMatch ? 1.0  : 0.15;
+  const weight   = isMatch ? 1.5  : 0.5;
+
+  const outerRing = L.circle([z.lat,z.lng], {{
     radius:APPROACH_R, color:col, fillColor:col,
-    fillOpacity:0.10, weight:1.5, dashArray:'6 4'
+    fillOpacity:outerOp, weight:weight, dashArray:'6 4',
+    opacity: isMatch ? 1.0 : 0.2
   }}).addTo(map);
-  // Inner entered ring
-  L.circle([z.lat,z.lng], {{
+
+  const innerRing = L.circle([z.lat,z.lng], {{
     radius:ENTER_R, color:col, fillColor:col,
-    fillOpacity:0.28, weight:2
+    fillOpacity:innerOp, weight: isMatch ? 2 : 0.5,
+    opacity: isMatch ? 1.0 : 0.2
   }}).addTo(map);
-  // Marker
-  L.marker([z.lat,z.lng], {{
+
+  // Pulse animation CSS on matched zones when search active
+  const pulseStyle = (hasSearch && isMatch)
+    ? `animation:pulse 1.4s ease-in-out infinite; box-shadow:0 0 14px ${{col}}cc;`
+    : `box-shadow:0 0 7px ${{col}}99;`;
+
+  const marker = L.marker([z.lat,z.lng], {{
     icon: L.divIcon({{
       className:'',
       html:`<div style="width:13px;height:13px;border-radius:50%;background:${{col}};
-                 border:2px solid #fff;box-shadow:0 0 7px ${{col}}99"></div>`,
+               border:2px solid #fff;opacity:${{markerOp}};${{pulseStyle}}"></div>`,
       iconSize:[13,13], iconAnchor:[6,6]
     }})
   }}).bindPopup(`
@@ -355,7 +373,29 @@ ZONES.forEach(z => {{
     Severity: <b>${{z.si.toFixed(1)}}</b> | Risk: <b style="color:${{col}}">${{z.risk}}</b><br>
     Accidents: <b>${{z.ta}}</b> | Fatalities: <b>${{z.tf}}</b>
   `,{{maxWidth:220}}).addTo(zoneLayer);
+
+  zoneMarkers[z.id] = {{ outerRing, innerRing, marker }};
 }});
+
+// Inject pulse keyframe
+const styleEl = document.createElement('style');
+styleEl.textContent = `@keyframes pulse {{
+  0%,100% {{ transform:scale(1); opacity:1; }}
+  50%      {{ transform:scale(1.45); opacity:0.7; }}
+}}`;
+document.head.appendChild(styleEl);
+
+// If search active — zoom to fit matched zones
+if (hasSearch && zoneMatchIds.size > 0) {{
+  const matchedZones = ZONES.filter(z => zoneMatchIds.has(z.id));
+  const lats = matchedZones.map(z => z.lat);
+  const lngs = matchedZones.map(z => z.lng);
+  const bounds = L.latLngBounds(
+    [Math.min(...lats) - 0.01, Math.min(...lngs) - 0.01],
+    [Math.max(...lats) + 0.01, Math.max(...lngs) + 0.01]
+  );
+  map.fitBounds(bounds, {{padding:[40,40], maxZoom:15, animate:true, duration:1.0}});
+}}
 
 // ── DRIVER PATHS ──────────────────────────────
 const pathLayer = L.layerGroup().addTo(map);
@@ -363,31 +403,43 @@ const PATH_COLORS = ['#00e5ff','#69ff47','#ff4081','#e040fb','#ffab40'];
 PATHS.forEach((p,i) => {{
   if (!p.coords || p.coords.length < 2) return;
   const col = PATH_COLORS[i % PATH_COLORS.length];
-  // Draw path line (dashed guide)
   L.polyline(p.coords, {{color:col, weight:4, opacity:0.55, dashArray:'8 5'}})
    .bindPopup(`<b>Driver Path #${{p.id}}</b> — ${{p.coords.length}} points`)
    .addTo(pathLayer);
-  // End marker only (start is where car begins — no dot there to avoid duplicate)
   L.circleMarker(p.coords[p.coords.length-1], {{
     radius:7, color:'#d50000', fillColor:'#d50000', fillOpacity:1, weight:2
   }}).bindTooltip('🔴 Destination').addTo(pathLayer);
 }});
 
-// ── SEARCHED LOCATION ────────────────────────
+// ── SEARCHED LOCATION MARKER ──────────────────
 if (HLIGHT) {{
   L.marker(HLIGHT, {{icon:L.divIcon({{className:'',
     html:`<div style="background:#00e5ff;width:18px;height:18px;border-radius:50%;
-               border:3px solid #fff;box-shadow:0 0 14px #00e5ff"></div>`,
-    iconSize:[18,18],iconAnchor:[9,9]}})
+             border:3px solid #fff;box-shadow:0 0 14px #00e5ff"></div>`,
+    iconSize:[18,18], iconAnchor:[9,9]}})
   }}).bindPopup('<b>📍 Searched Location</b>').addTo(map).openPopup();
-  map.setView(HLIGHT, 14);
+  if (!hasSearch) map.setView(HLIGHT, 14);
 }}
 
-// ── LAYER CONTROL ─────────────────────────────
-L.control.layers(null, {{
-  'Accident Zones': zoneLayer,
-  'Driver Paths'  : pathLayer,
-}}, {{collapsed:false}}).addTo(map);
+// ── LAYER CONTROL — 5 base maps + overlays ────
+const _baseCtrl = {{
+  '🌑 Dark (CartoDB)'   : baseLayers['dark'],
+  '☀️ Light (CartoDB)'  : baseLayers['light'],
+  '🗺️ Street (OSM)'     : baseLayers['street'],
+  '🛰️ Satellite (Esri)' : baseLayers['satellite'],
+  '🏔️ Topo (OpenTopo)'  : baseLayers['topo'],
+}};
+const _overlayCtrl = {{
+  '🚨 Accident Zones' : zoneLayer,
+  '🛣️ Driver Paths'   : pathLayer,
+}};
+L.control.layers(_baseCtrl, _overlayCtrl, {{collapsed:false, position:'topright'}}).addTo(map);
+
+// Save base layer choice across st.rerun()
+map.on('baselayerchange', function(e) {{
+  const _m = {{'🌑 Dark (CartoDB)':'dark','☀️ Light (CartoDB)':'light','🗺️ Street (OSM)':'street','🛰️ Satellite (Esri)':'satellite','🏔️ Topo (OpenTopo)':'topo'}};
+  const _k = _m[e.name]; if (_k) localStorage.setItem('riskmap_baselayer', _k);
+}});
 
 // ── LEGEND ───────────────────────────────────
 const legend = L.control({{position:'bottomright'}});
@@ -406,36 +458,29 @@ legend.addTo(map);
 // ── MOVING CAR SIMULATION ─────────────────────
 if (SHOW_CAR && PATHS.length > 0) {{
 
-  // Count total points across all paths to compute per-step delay for ~30s total
-  const totalPts = PATHS.reduce((s,p) => s + (p.coords ? p.coords.length : 0), 0);
-  const TARGET_MS = 30000; // 30 seconds total journey
-  const BASE_DELAY = totalPts > 0 ? Math.max(50, Math.floor(TARGET_MS / totalPts)) : 200;
-
-  // Single clean car icon — no background div, just emoji with glow
   function makeCarIcon() {{
     return L.divIcon({{
-      className: 'car-icon',   // must be non-empty string to avoid Leaflet adding extra class
+      className: 'car-icon',
       html: `<span style="font-size:22px;line-height:1;display:block;
                           filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
-      popupAnchor: [0, -14]
+      iconSize:[24,24], iconAnchor:[12,12], popupAnchor:[0,-14]
     }});
   }}
 
-  // Car marker — placed at start, NO trail yet
   const carMarker = L.marker(PATHS[0].coords[0], {{
-    icon: makeCarIcon(),
-    zIndexOffset: 1000
+    icon: makeCarIcon(), zIndexOffset:1000
   }}).addTo(map);
 
-  // Trail line — empty at start, grows as car moves
   const trailPts  = [];
   const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(map);
 
-  // Per-zone alert state
+  // Zone alert state: null | 'approaching' | 'entered'
   const zoneState = {{}};
 
+  // checkZones called IMMEDIATELY after setLatLng — zero offset between
+  // car visual position and alert. Interpolated 8m steps ensure the car
+  // never skips a boundary, so approaching → entered → left fires at
+  // the exact pixel the car icon crosses each ring.
   function checkZones(lat, lng) {{
     ZONES.forEach(z => {{
       const dist      = haversineM(lat, lng, z.lat, z.lng);
@@ -443,6 +488,7 @@ if (SHOW_CAR && PATHS.length > 0) {{
       const riskLevel = z.risk ? z.risk.toUpperCase() : 'RISK';
 
       if (dist <= ENTER_R) {{
+        // ── Car physically inside inner zone ──
         if (prev !== 'entered') {{
           zoneState[z.id] = 'entered';
           addAlert(
@@ -452,14 +498,17 @@ if (SHOW_CAR && PATHS.length > 0) {{
           );
         }}
       }} else if (dist <= APPROACH_R) {{
+        // ── Car inside outer approach ring ──
         if (prev === 'entered') {{
-          zoneState[z.id] = null;
+          // Exiting inner → show safe
+          zoneState[z.id] = 'approaching';
           addAlert(
             `✅ Left ${{riskLevel}} Risk Zone — Safe: ${{z.area}}`,
             `✅ <b>Left ${{riskLevel}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`,
             'left'
           );
-        }} else if (prev !== 'approaching') {{
+        }} else if (prev === null) {{
+          // First crossing into approach ring → show approaching
           zoneState[z.id] = 'approaching';
           addAlert(
             `⚠️ Approaching ${{riskLevel}} Risk Zone: ${{z.area}} (${{Math.round(dist)}}m)`,
@@ -468,6 +517,7 @@ if (SHOW_CAR && PATHS.length > 0) {{
           );
         }}
       }} else {{
+        // ── Fully outside both rings ──
         if (prev === 'entered') {{
           zoneState[z.id] = null;
           addAlert(
@@ -482,52 +532,60 @@ if (SHOW_CAR && PATHS.length > 0) {{
     }});
   }}
 
-  let pathIdx = 0, ptIdx = 0;
+  // ── Interpolate GPS segments into 8m sub-steps ──
+  // Ensures checkZones fires at every ~8m position so alert timing
+  // matches the car icon position exactly on screen.
+  const STEP_M  = 8;
+  const TICK_MS = 80;  // increase to slow car down further
+
+  const allCoords = [];
+  PATHS.forEach(p => {{ if (p.coords) allCoords.push(...p.coords); }});
+
+  const interpCoords = [];
+  for (let i = 0; i < allCoords.length - 1; i++) {{
+    const [la1,ln1] = allCoords[i];
+    const [la2,ln2] = allCoords[i+1];
+    const seg   = haversineM(la1, ln1, la2, ln2);
+    const steps = Math.max(1, Math.round(seg / STEP_M));
+    for (let s = 0; s < steps; s++) {{
+      const t = s / steps;
+      interpCoords.push([la1+(la2-la1)*t, ln1+(ln2-ln1)*t]);
+    }}
+  }}
+  interpCoords.push(allCoords[allCoords.length-1]);
+
+  let stepIdx = 0;
 
   function step() {{
-    if (pathIdx >= PATHS.length) {{
-      // Simulation done
+    if (stepIdx >= interpCoords.length) {{
       carMarker.setIcon(L.divIcon({{
-        className: 'car-icon',
-        html: `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
+        className:'car-icon',
+        html:`<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
         iconSize:[24,24], iconAnchor:[12,12]
       }}));
-      addAlert('🏁 Destination reached!', '🏁 <b>Simulation complete — Destination reached safely!</b>', 'safe');
+      addAlert('🏁 Destination reached!','🏁 <b>Simulation complete — Destination reached safely!</b>','safe');
       return;
     }}
+    const [lat,lng] = interpCoords[stepIdx];
 
-    const coords = PATHS[pathIdx].coords;
-    if (ptIdx >= coords.length) {{
-      pathIdx++;
-      ptIdx = 0;
-      if (pathIdx < PATHS.length)
-        addAlert(`🟢 Path #${{PATHS[pathIdx].id}}`, `🟢 <b>Continuing to Path #${{PATHS[pathIdx].id}}</b>`, 'safe');
-      setTimeout(step, BASE_DELAY);
-      return;
-    }}
-
-    const [lat, lng] = coords[ptIdx];
-
-    // Move car
-    carMarker.setLatLng([lat, lng]);
-
-    // Grow trail — only from this point onward
-    trailPts.push([lat, lng]);
+    // 1. Move car
+    carMarker.setLatLng([lat,lng]);
+    // 2. Grow trail
+    trailPts.push([lat,lng]);
     trailLine.setLatLngs(trailPts);
+    // 3. Follow car
+    if (!map.getBounds().contains([lat,lng]))
+      map.panTo([lat,lng], {{animate:true, duration:0.4, easeLinearity:0.5}});
+    // 4. Alert — fires at exact same step as car move, zero delay
+    checkZones(lat,lng);
 
-    // Pan map gently to follow car
-    if (!map.getBounds().contains([lat, lng]))
-      map.panTo([lat, lng], {{animate:true, duration:0.5, easeLinearity:0.5}});
-
-    checkZones(lat, lng);
-    ptIdx++;
-    setTimeout(step, BASE_DELAY);
+    stepIdx++;
+    setTimeout(step, TICK_MS);
   }}
 
-  // Zoom to start of path before beginning
-  map.setView(PATHS[0].coords[0], 14);
-  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — Path #${{PATHS[0].id}} | ${{totalPts}} steps | ~30s journey</b>`, 'safe');
-  setTimeout(step, 500); // small delay so map settles before car moves
+  map.setView(interpCoords[0], 14);
+  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — ${{interpCoords.length}} steps</b>`, 'safe');
+  setTimeout(step, 500);
 }}
 </script>
 </body>
@@ -548,14 +606,14 @@ def alert_box(level: str, text: str):
 # 8. MAIN APPLICATION LOGIC
 # ─────────────────────────────────────────────
 def main():
-    # ── Session state init — must be FIRST, before any widget ──
-    if "running"          not in st.session_state: st.session_state.running          = False
-    if "highlight_point"  not in st.session_state: st.session_state.highlight_point  = None
-    if "highlight_label"  not in st.session_state: st.session_state.highlight_label  = ""
-    if "risk_info"        not in st.session_state: st.session_state.risk_info        = None
-    if "search_error"     not in st.session_state: st.session_state.search_error     = ""
+    # ── Session state init ──
+    if "running"         not in st.session_state: st.session_state.running         = False
+    if "highlight_point" not in st.session_state: st.session_state.highlight_point = None
+    if "highlight_label" not in st.session_state: st.session_state.highlight_label = ""
+    if "search_query"    not in st.session_state: st.session_state.search_query    = ""
+    if "risk_info"       not in st.session_state: st.session_state.risk_info       = None
+    if "search_error"    not in st.session_state: st.session_state.search_error    = ""
 
-    # ── Sidebar — widgets only, NO rerun inside ──
     with st.sidebar:
         st.image("https://img.icons8.com/color/96/traffic-jam.png", width=56)
         st.title("Road Risk Navigator")
@@ -577,16 +635,16 @@ def main():
         st.divider()
 
         st.subheader("\U0001f4cd Location Search")
-        st.caption("Enter place name, area, or lat/lng (e.g. 19.076, 72.877)")
         address_input = st.text_input(
             "Search location",
-            placeholder="e.g. Andheri | 19.076, 72.877 | Kurla West"
+            placeholder="e.g. Deonar | Andheri, Mumbai | 19.076, 72.877"
         )
         search_btn = st.button("\U0001f50d Find & Check Risk", use_container_width=True)
         if st.session_state.highlight_point:
             if st.button("✖ Clear Search", use_container_width=True):
                 st.session_state.highlight_point = None
                 st.session_state.highlight_label = ""
+                st.session_state.search_query    = ""
                 st.session_state.risk_info       = None
                 st.session_state.search_error    = ""
                 st.rerun()
@@ -598,7 +656,7 @@ def main():
         show_paths  = st.checkbox("Show Driver Paths", value=True)
         show_zones  = st.checkbox("Show Accident Zones", value=True)
 
-    # ── Button logic OUTSIDE sidebar — st.rerun() is reliable here ──
+    # ── Start / Stop ──
     if start_btn:
         st.session_state.running = True
         st.rerun()
@@ -606,32 +664,31 @@ def main():
         st.session_state.running = False
         st.rerun()
 
-    # ── Search logic — stores result in session_state WITHOUT rerunning ──
-    # This means the car keeps its current state (running/stopped) unchanged.
+    # ── Load Data ──
+    accident_df  = load_accident_data()
+    driver_paths = load_driver_path()
+
+    # ── Search — stored in session_state, NO st.rerun() so car keeps running ──
     if search_btn and address_input:
-        accident_df_for_search = load_accident_data()
-        result = resolve_location(address_input.strip(), accident_df_for_search)
+        result = resolve_location(address_input.strip(), accident_df)
         if result:
             lat, lon, label = result
             st.session_state.highlight_point = (lat, lon)
             st.session_state.highlight_label = label
-            st.session_state.risk_info       = check_risk_at_point(lat, lon, accident_df_for_search, 500)
+            st.session_state.search_query    = address_input.strip()
+            st.session_state.risk_info       = check_risk_at_point(lat, lon, accident_df, 500)
             st.session_state.search_error    = ""
         else:
             st.session_state.highlight_point = None
-            st.session_state.highlight_label = ""
+            st.session_state.search_query    = ""
             st.session_state.risk_info       = None
             st.session_state.search_error    = f"Location not found for '{address_input}'. Try a place name, area, or lat/lng."
-
-    # ── Load Data ────────────────────────────
-    accident_df  = load_accident_data()
-    driver_paths = load_driver_path()
 
     filtered_df   = accident_df[accident_df["risk_level"].isin(risk_filter)] if risk_filter else accident_df
     display_df    = filtered_df if show_zones else accident_df.iloc[0:0]
     display_paths = driver_paths if show_paths else []
 
-    # ── Header KPIs ──────────────────────────
+    # ── Header KPIs ──
     st.title("🚦 Road Accident Risk Dashboard")
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Total Hotspots",   len(accident_df))
@@ -641,7 +698,7 @@ def main():
     k5.metric("Driver Paths",     len(driver_paths))
     st.divider()
 
-    # ── Risk Assessment display (from session_state — survives all reruns) ──
+    # ── Search error / Risk Assessment ──
     if st.session_state.search_error:
         st.error(st.session_state.search_error)
 
@@ -658,7 +715,7 @@ def main():
             ].sort_values("distance_m")
             st.dataframe(near_df, use_container_width=True, hide_index=True)
 
-    # ── Map ───────────────────────────────────
+    # ── Map ──
     st.subheader("🗺️ Interactive Risk Map  •  🚗 Live Car Simulation")
     st.caption("The 🚗 car moves along the driver path. The alert feed at the bottom of the map shows real-time zone alerts.")
 
@@ -670,12 +727,13 @@ def main():
         driver_paths    = display_paths,
         center_lat      = center_lat,
         center_lng      = center_lng,
-        highlight_point = st.session_state.highlight_point,   # ← from session_state
+        highlight_point = st.session_state.highlight_point,
+        search_query    = st.session_state.search_query,
         show_car        = st.session_state.running,
     )
     components.html(map_html, height=700, scrolling=False)
 
-    # ── Data Tables ───────────────────────────
+    # ── Data Table ──
     with st.expander("📋 Accident Zone Data Table", expanded=False):
         st.dataframe(
             filtered_df[["id","city","area","location","risk_level",
@@ -684,8 +742,7 @@ def main():
             use_container_width=True, hide_index=True
         )
 
-
-    # ── Footer ────────────────────────────────
+    # ── Footer ──
     st.markdown("""
 <div class="footer-bar">
     🚦 <strong>Road Risk Navigator</strong> &nbsp;|&nbsp;
