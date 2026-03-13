@@ -73,7 +73,7 @@ SET risk_level =
 FROM severity_stats s;
 
 -- =====================================================
--- 6. HIGH-RISK BUFFER ZONES (200m FIXED BUFFER)
+-- 6. HIGH-RISK BUFFER ZONES (200 FIXED BUFFER)
 -- =====================================================
 ALTER TABLE accident_data1
 ADD COLUMN IF NOT EXISTS buffer_geom geometry(Polygon, 4326);
