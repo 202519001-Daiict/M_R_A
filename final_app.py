@@ -260,24 +260,9 @@ const ENTER_R    = 120;
 // preferCanvas MUST be false — it breaks divIcon (causes ghost/duplicate car)
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
-
-// ── 5 BASE MAP TILE LAYERS ────────────────────
-const baseLayers = {{
-  'dark'      : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',
-                  {{attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19}}),
-  'light'     : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
-                  {{attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19}}),
-  'street'    : L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
-                  {{attribution:'© OpenStreetMap contributors', maxZoom:19}}),
-  'satellite' : L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}',
-                  {{attribution:'© Esri World Imagery', maxZoom:19}}),
-  'topo'      : L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',
-                  {{attribution:'© OpenStreetMap © OpenTopoMap', subdomains:'abc', maxZoom:17}}),
-}};
-
-// ── RESTORE last selected layer from localStorage (survives Start/Stop rerun) ──
-const savedLayer = localStorage.getItem('riskmap_baselayer') || 'dark';
-baseLayers[savedLayer].addTo(map);
+L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
+}}).addTo(map);
 
 // ── HELPERS ──────────────────────────────────
 function siColor(si) {{
@@ -366,32 +351,11 @@ if (HLIGHT) {{
   map.setView(HLIGHT, 14);
 }}
 
-// ── LAYER CONTROL (Base Maps + Overlays) ──────
-const baseMapControl = {{
-  '🌑 Dark (CartoDB)'   : baseLayers['dark'],
-  '☀️ Light (CartoDB)'  : baseLayers['light'],
-  '🗺️ Street (OSM)'     : baseLayers['street'],
-  '🛰️ Satellite (Esri)' : baseLayers['satellite'],
-  '🏔️ Topo (OpenTopo)'  : baseLayers['topo'],
-}};
-const overlayControl = {{
-  '🚨 Accident Zones' : zoneLayer,
-  '🛣️ Driver Paths'   : pathLayer,
-}};
-L.control.layers(baseMapControl, overlayControl, {{collapsed:false, position:'topright'}}).addTo(map);
-
-// ── SAVE selected base layer to localStorage so it survives st.rerun() ──
-map.on('baselayerchange', function(e) {{
-  const nameToKey = {{
-    '🌑 Dark (CartoDB)'   : 'dark',
-    '☀️ Light (CartoDB)'  : 'light',
-    '🗺️ Street (OSM)'     : 'street',
-    '🛰️ Satellite (Esri)' : 'satellite',
-    '🏔️ Topo (OpenTopo)'  : 'topo',
-  }};
-  const key = nameToKey[e.name];
-  if (key) localStorage.setItem('riskmap_baselayer', key);
-}});
+// ── LAYER CONTROL ─────────────────────────────
+L.control.layers(null, {{
+  'Accident Zones': zoneLayer,
+  'Driver Paths'  : pathLayer,
+}}, {{collapsed:false}}).addTo(map);
 
 // ── LEGEND ───────────────────────────────────
 const legend = L.control({{position:'bottomright'}});
@@ -410,12 +374,7 @@ legend.addTo(map);
 // ── MOVING CAR SIMULATION ─────────────────────
 if (SHOW_CAR && PATHS.length > 0) {{
 
-  // Count total points across all paths to compute per-step delay for ~30s total
-  const totalPts = PATHS.reduce((s,p) => s + (p.coords ? p.coords.length : 0), 0);
-  const TARGET_MS = 30000; // 30 seconds total journey
-  const BASE_DELAY = totalPts > 0 ? Math.max(50, Math.floor(TARGET_MS / totalPts)) : 200;
-
-  // Single clean car icon — no background div, just emoji with glow
+  // Single clean car icon
   function makeCarIcon() {{
     return L.divIcon({{
       className: 'car-icon',   // must be non-empty string to avoid Leaflet adding extra class
@@ -437,9 +396,11 @@ if (SHOW_CAR && PATHS.length > 0) {{
   const trailPts  = [];
   const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(map);
 
-  // Per-zone alert state
+  // ── Per-zone state: null | 'approaching' | 'entered' ──
   const zoneState = {{}};
 
+  // checkZones is called at EVERY interpolated sub-step (every ~10m),
+  // so the alert fires the exact moment the car icon crosses the boundary.
   function checkZones(lat, lng) {{
     ZONES.forEach(z => {{
       const dist      = haversineM(lat, lng, z.lat, z.lng);
@@ -457,13 +418,13 @@ if (SHOW_CAR && PATHS.length > 0) {{
         }}
       }} else if (dist <= APPROACH_R) {{
         if (prev === 'entered') {{
-          zoneState[z.id] = null;
+          zoneState[z.id] = 'approaching';
           addAlert(
             `✅ Left ${{riskLevel}} Risk Zone — Safe: ${{z.area}}`,
             `✅ <b>Left ${{riskLevel}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`,
             'left'
           );
-        }} else if (prev !== 'approaching') {{
+        }} else if (prev === null) {{
           zoneState[z.id] = 'approaching';
           addAlert(
             `⚠️ Approaching ${{riskLevel}} Risk Zone: ${{z.area}} (${{Math.round(dist)}}m)`,
@@ -486,11 +447,34 @@ if (SHOW_CAR && PATHS.length > 0) {{
     }});
   }}
 
-  let pathIdx = 0, ptIdx = 0;
+  // ── Flatten all path coords ──
+  const allCoords = [];
+  PATHS.forEach(p => {{ if (p.coords) allCoords.push(...p.coords); }});
+
+  // ── Interpolate GPS segments into ~10m sub-steps ──
+  // Without this, the car jumps large distances between real GPS points,
+  // causing alerts to fire early or late. With 10m steps, the car position
+  // that triggers the alert is always exactly where you see it on screen.
+  const STEP_M  = 10;  // metres between sub-steps (smaller = more precise sync)
+  const TICK_MS = 50;  // ms per sub-step (controls overall speed)
+
+  const interpCoords = [];
+  for (let i = 0; i < allCoords.length - 1; i++) {{
+    const [lat1, lng1] = allCoords[i];
+    const [lat2, lng2] = allCoords[i + 1];
+    const segDist = haversineM(lat1, lng1, lat2, lng2);
+    const steps   = Math.max(1, Math.round(segDist / STEP_M));
+    for (let s = 0; s < steps; s++) {{
+      const t = s / steps;
+      interpCoords.push([lat1 + (lat2 - lat1) * t, lng1 + (lng2 - lng1) * t]);
+    }}
+  }}
+  interpCoords.push(allCoords[allCoords.length - 1]);
+
+  let stepIdx = 0;
 
   function step() {{
-    if (pathIdx >= PATHS.length) {{
-      // Simulation done
+    if (stepIdx >= interpCoords.length) {{
       carMarker.setIcon(L.divIcon({{
         className: 'car-icon',
         html: `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
@@ -500,38 +484,30 @@ if (SHOW_CAR && PATHS.length > 0) {{
       return;
     }}
 
-    const coords = PATHS[pathIdx].coords;
-    if (ptIdx >= coords.length) {{
-      pathIdx++;
-      ptIdx = 0;
-      if (pathIdx < PATHS.length)
-        addAlert(`🟢 Path #${{PATHS[pathIdx].id}}`, `🟢 <b>Continuing to Path #${{PATHS[pathIdx].id}}</b>`, 'safe');
-      setTimeout(step, BASE_DELAY);
-      return;
-    }}
+    const [lat, lng] = interpCoords[stepIdx];
 
-    const [lat, lng] = coords[ptIdx];
-
-    // Move car
+    // 1. Move car visually
     carMarker.setLatLng([lat, lng]);
-
-    // Grow trail — only from this point onward
+    // 2. Grow trail
     trailPts.push([lat, lng]);
     trailLine.setLatLngs(trailPts);
-
-    // Pan map gently to follow car
+    // 3. Follow car
     if (!map.getBounds().contains([lat, lng]))
-      map.panTo([lat, lng], {{animate:true, duration:0.5, easeLinearity:0.5}});
-
+      map.panTo([lat, lng], {{animate:true, duration:0.4, easeLinearity:0.5}});
+    // 4. Check zones AFTER car moved — always perfectly in sync
     checkZones(lat, lng);
-    ptIdx++;
-    setTimeout(step, BASE_DELAY);
+
+    stepIdx++;
+    setTimeout(step, TICK_MS);
   }}
 
-  // Zoom to start of path before beginning
-  map.setView(PATHS[0].coords[0], 14);
-  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — Path #${{PATHS[0].id}} | ${{totalPts}} steps | ~30s journey</b>`, 'safe');
-  setTimeout(step, 500); // small delay so map settles before car moves
+  map.setView(interpCoords[0], 14);
+  addAlert(
+    `🟢 Simulation started`,
+    `🟢 <b>Simulation started — ${{interpCoords.length}} steps | ~${{Math.round(interpCoords.length * TICK_MS / 1000)}}s journey</b>`,
+    'safe'
+  );
+  setTimeout(step, 500);
 }}
 </script>
 </body>
