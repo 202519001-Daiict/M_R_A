@@ -173,10 +173,8 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 <head>
 <meta charset="utf-8"/>
 <title>Road Risk Map</title>
-<!-- CHANGE 1: jsdelivr CDN replaces unpkg — unpkg times out on Streamlit Cloud -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-<!-- leaflet.motion REMOVED — broken library was causing car not to move -->
 <style>
   * {{ box-sizing:border-box; margin:0; padding:0; }}
   body, html {{ height:100%; background:#0e1117; font-family:sans-serif; }}
@@ -262,7 +260,24 @@ const ENTER_R    = 120;
 // preferCanvas MUST be false — it breaks divIcon (causes ghost/duplicate car)
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
-// Base tile layer added via enhanced layer control below
+
+// ── BASE MAP LAYERS ───────────────────────────
+const baseDark = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
+}});
+const baseLight = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
+}});
+const baseStreet = L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+  attribution:'© OpenStreetMap contributors', maxZoom:19
+}});
+const baseSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
+  attribution:'© Esri World Imagery', maxZoom:19
+}});
+const baseTopo = L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png', {{
+  attribution:'© OpenTopoMap contributors', maxZoom:17
+}});
+baseDark.addTo(map); // default base
 
 // ── HELPERS ──────────────────────────────────
 function siColor(si) {{
@@ -351,30 +366,33 @@ if (HLIGHT) {{
   map.setView(HLIGHT, 14);
 }}
 
-// ── ENHANCED LAYER CONTROL ────────────────────
-// Base map options
-const baseDark = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
+// ── LAYER CONTROL — base maps + overlays ─────
+// High-risk / medium-risk / low-risk sub-layers for fine control
+const highRiskLayer   = L.layerGroup().addTo(map);
+const medRiskLayer    = L.layerGroup().addTo(map);
+const lowRiskLayer    = L.layerGroup().addTo(map);
+const trailLayer      = L.layerGroup().addTo(map); // car trail overlay
+ZONES.forEach(z => {{
+  const col = siColor(z.si);
+  const target = z.si > 25 ? highRiskLayer : z.si > 10 ? medRiskLayer : lowRiskLayer;
+  L.circle([z.lat,z.lng], {{
+    radius:50, color:col, fillColor:col, fillOpacity:0.35, weight:2
+  }}).addTo(target);
 }});
-const baseStreet = L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-  attribution:'© OpenStreetMap contributors', maxZoom:19
-}});
-const baseSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
-  attribution:'© Esri World Imagery', maxZoom:19
-}});
-
-// Remove the existing dark tile layer (already added at init) and re-add via control
-map.eachLayer(layer => {{ if (layer instanceof L.TileLayer) map.removeLayer(layer); }});
-baseDark.addTo(map);
-
 const baseMaps = {{
-  '🌑 Dark (CartoDB)'  : baseDark,
-  '🗺️ Street (OSM)'    : baseStreet,
-  '🛰️ Satellite (Esri)': baseSatellite,
+  '🌑 Dark (CartoDB)'   : baseDark,
+  '☀️ Light (CartoDB)'  : baseLight,
+  '🗺️ Street (OSM)'     : baseStreet,
+  '🛰️ Satellite (Esri)' : baseSatellite,
+  '🏔️ Topo (OpenTopo)'  : baseTopo,
 }};
 const overlayMaps = {{
-  '🚨 Accident Zones': zoneLayer,
-  '🛣️ Driver Paths'  : pathLayer,
+  '🚨 All Accident Zones' : zoneLayer,
+  '🔴 High Risk Zones'    : highRiskLayer,
+  '🟠 Medium Risk Zones'  : medRiskLayer,
+  '🟡 Low Risk Zones'     : lowRiskLayer,
+  '🛣️ Driver Paths'       : pathLayer,
+  '🔵 Car Trail'          : trailLayer,
 }};
 L.control.layers(baseMaps, overlayMaps, {{collapsed:false, position:'topright'}}).addTo(map);
 
@@ -392,32 +410,36 @@ legend.onAdd = () => {{
 }};
 legend.addTo(map);
 
-// CHANGE 2: replaced broken leaflet.motion block with pure setInterval animation
-// CHANGE 3: speed set to 80 km/h + 50ms tick = fast smooth movement
+// ── MOVING CAR SIMULATION — smooth RAF interpolation ─────────────────
 if (SHOW_CAR && PATHS.length > 0) {{
 
-  const totalPts = PATHS.reduce((s,p) => s + (p.coords ? p.coords.length : 0), 0);
-
-  // Flatten all path coords into one continuous route
+  // Flatten ALL path coords into one continuous route
   const allCoords = [];
   PATHS.forEach(p => {{ if (p.coords) allCoords.push(...p.coords); }});
+  const totalPts = allCoords.length;
 
-  // Trail line — grows as car moves
-  const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(map);
+  // Count total points across all paths to compute per-step delay for ~30s total
+  const TARGET_MS = 30000; // 30 seconds total journey
+  const BASE_DELAY = totalPts > 0 ? Math.max(50, Math.floor(TARGET_MS / totalPts)) : 200;
 
-  // Car marker — plain divIcon, no library needed
-  const carMarker = L.marker(allCoords[0], {{
+  // Car marker — placed at start, NO trail yet
+  const carMarker = L.marker(PATHS[0].coords[0], {{
     icon: L.divIcon({{
       className: 'car-icon',
       html: `<span style="font-size:22px;line-height:1;display:block;
                           filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
       iconSize: [24, 24],
-      iconAnchor: [12, 12]
+      iconAnchor: [12, 12],
+      popupAnchor: [0, -14]
     }}),
     zIndexOffset: 1000
   }}).addTo(map);
 
-  // Zone alert state
+  // Trail line — empty at start, grows as car moves (also added to trailLayer overlay)
+  const trailPts  = [];
+  const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(trailLayer);
+
+  // Per-zone alert state
   const zoneState = {{}};
 
   function checkZones(lat, lng) {{
@@ -466,68 +488,58 @@ if (SHOW_CAR && PATHS.length > 0) {{
     }});
   }}
 
-  // Precompute cumulative segment distances for smooth interpolation
-  const segLengths = [];
-  let totalDist = 0;
-  for (let i = 1; i < allCoords.length; i++) {{
-    const d = haversineM(allCoords[i-1][0], allCoords[i-1][1], allCoords[i][0], allCoords[i][1]);
-    segLengths.push(d);
-    totalDist += d;
-  }}
+  // ── Smooth RAF interpolation between every pair of waypoints ──────────
+  // Each segment takes exactly SEG_MS milliseconds → silky smooth
+  const SEG_MS = Math.max(80, Math.floor(TARGET_MS / Math.max(totalPts - 1, 1)));
+  let segIdx   = 0;   // which segment we're currently animating
+  let segStart = null; // timestamp when current segment began
 
-  // Return interpolated [lat,lng] at cumulative distance d along the route
-  function posAtDist(d) {{
-    let cum = 0;
-    for (let i = 0; i < segLengths.length; i++) {{
-      if (cum + segLengths[i] >= d) {{
-        const t = (d - cum) / segLengths[i];
-        const a = allCoords[i], b = allCoords[i+1];
-        return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t];
-      }}
-      cum += segLengths[i];
+  function animateSeg(ts) {{
+    if (segIdx >= allCoords.length - 1) {{
+      // Journey complete
+      carMarker.setLatLng(allCoords[allCoords.length - 1]);
+      carMarker.setIcon(L.divIcon({{
+        className: 'car-icon',
+        html: `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
+        iconSize:[24,24], iconAnchor:[12,12]
+      }}));
+      addAlert('🏁 Destination reached!', '🏁 <b>Simulation complete — Destination reached safely!</b>', 'safe');
+      return;
     }}
-    return allCoords[allCoords.length - 1];
+
+    if (segStart === null) segStart = ts;
+    const elapsed = ts - segStart;
+    const t = Math.min(elapsed / SEG_MS, 1); // 0 → 1 progress within this segment
+
+    const a = allCoords[segIdx];
+    const b = allCoords[segIdx + 1];
+
+    // Linear interpolation lat/lng
+    const lat = a[0] + (b[0] - a[0]) * t;
+    const lng = a[1] + (b[1] - a[1]) * t;
+
+    carMarker.setLatLng([lat, lng]);
+    trailPts.push([lat, lng]);
+    trailLine.setLatLngs(trailPts);
+
+    if (!map.getBounds().contains([lat, lng]))
+      map.panTo([lat, lng], {{animate:true, duration:0.4, easeLinearity:0.5}});
+
+    checkZones(lat, lng);
+
+    if (t >= 1) {{
+      // Segment done — move to next
+      segIdx++;
+      segStart = null;
+    }}
+
+    requestAnimationFrame(animateSeg);
   }}
 
-  // 80 km/h speed, 50ms tick = visually fast and smooth
-  const SPEED_MPS     = 80 / 3.6;
-  const TICK_MS       = 50;
-  const DIST_PER_TICK = SPEED_MPS * (TICK_MS / 1000);
-  let distTravelled   = 0;
-  const trailPoints   = [allCoords[0]];
-
-  map.setView(allCoords[0], 14);
-  setTimeout(() => {{
-    addAlert(
-      `🟢 Simulation started`,
-      `🟢 <b>Simulation started — ${{totalPts}} waypoints | setInterval active</b>`,
-      'safe'
-    );
-
-    const timer = setInterval(() => {{
-      distTravelled += DIST_PER_TICK;
-
-      if (distTravelled >= totalDist) {{
-        clearInterval(timer);
-        carMarker.setLatLng(allCoords[allCoords.length - 1]);
-        trailLine.setLatLngs(allCoords);
-        addAlert('🏁 Destination reached!', '🏁 <b>Simulation complete — Destination reached safely!</b>', 'safe');
-        return;
-      }}
-
-      const pos = posAtDist(distTravelled);
-      carMarker.setLatLng(pos);
-
-      trailPoints.push(pos);
-      trailLine.setLatLngs(trailPoints);
-
-      if (!map.getBounds().contains(pos))
-        map.panTo(pos, {{animate:true, duration:0.5, easeLinearity:0.5}});
-
-      checkZones(pos[0], pos[1]);
-
-    }}, TICK_MS);
-  }}, 500);
+  // Zoom to start then begin
+  map.setView(PATHS[0].coords[0], 14);
+  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — Path #${{PATHS[0].id}} | ${{totalPts}} waypoints | smooth RAF animation</b>`, 'safe');
+  setTimeout(() => requestAnimationFrame(animateSeg), 500);
 }}
 </script>
 </body>
@@ -653,6 +665,7 @@ def main():
                           "latitude","longitude"]].sort_values("severity_index", ascending=False),
             use_container_width=True, hide_index=True
         )
+
 
     # ── Footer ────────────────────────────────
     st.markdown("""
