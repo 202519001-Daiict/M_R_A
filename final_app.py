@@ -173,8 +173,8 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 <head>
 <meta charset="utf-8"/>
 <title>Road Risk Map</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * {{ box-sizing:border-box; margin:0; padding:0; }}
   body, html {{ height:100%; background:#0e1117; font-family:sans-serif; }}
@@ -260,24 +260,9 @@ const ENTER_R    = 120;
 // preferCanvas MUST be false — it breaks divIcon (causes ghost/duplicate car)
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
-
-// ── BASE MAP LAYERS ───────────────────────────
-const baseDark = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
   attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
-}});
-const baseLight = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
-}});
-const baseStreet = L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-  attribution:'© OpenStreetMap contributors', maxZoom:19
-}});
-const baseSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
-  attribution:'© Esri World Imagery', maxZoom:19
-}});
-const baseTopo = L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png', {{
-  attribution:'© OpenTopoMap contributors', maxZoom:17
-}});
-baseDark.addTo(map); // default base
+}}).addTo(map);
 
 // ── HELPERS ──────────────────────────────────
 function siColor(si) {{
@@ -314,16 +299,16 @@ function addAlert(shortMsg, fullMsg, cls) {{
 const zoneLayer = L.layerGroup().addTo(map);
 ZONES.forEach(z => {{
   const col = siColor(z.si);
-  // Outer approach ring — into zoneLayer (not raw map)
+  // Outer approach ring
   L.circle([z.lat,z.lng], {{
     radius:APPROACH_R, color:col, fillColor:col,
     fillOpacity:0.10, weight:1.5, dashArray:'6 4'
-  }}).addTo(zoneLayer);
-  // Inner entered ring — into zoneLayer (not raw map)
+  }}).addTo(map);
+  // Inner entered ring
   L.circle([z.lat,z.lng], {{
     radius:ENTER_R, color:col, fillColor:col,
     fillOpacity:0.28, weight:2
-  }}).addTo(zoneLayer);
+  }}).addTo(map);
   // Marker
   L.marker([z.lat,z.lng], {{
     icon: L.divIcon({{
@@ -356,105 +341,110 @@ PATHS.forEach((p,i) => {{
   }}).bindTooltip('🔴 Destination').addTo(pathLayer);
 }});
 
-// ── SEARCHED LOCATION — rich popup with nearby zone info ─────────────
+// ── SEARCHED LOCATION — rich info popup ──────
 if (HLIGHT) {{
-  // Find all zones within 1500m, sorted by distance
+  // Find nearby zones within 1500m sorted by distance
   const nearby = ZONES
-    .map(z => ({{ ...z, dist: haversineM(HLIGHT[0], HLIGHT[1], z.lat, z.lng) }}))
+    .map(z => ({{...z, dist: haversineM(HLIGHT[0], HLIGHT[1], z.lat, z.lng)}}) )
     .filter(z => z.dist <= 1500)
-    .sort((a, b) => a.dist - b.dist);
+    .sort((a,b) => a.dist - b.dist);
 
-  // Risk color helper
-  function riskBadge(risk, si) {{
-    const col = si > 25 ? '#d50000' : si > 10 ? '#ff6d00' : '#ffd600';
-    return `<span style="background:${{col}};color:#000;font-weight:700;
-                         padding:1px 7px;border-radius:10px;font-size:0.75rem;">${{risk}}</span>`;
-  }}
+  // Also drop individual markers for each nearby zone with a pin
+  nearby.forEach(z => {{
+    const col = siColor(z.si);
+    L.circleMarker([z.lat, z.lng], {{
+      radius:10, color:col, fillColor:col, fillOpacity:0.85, weight:2
+    }}).bindPopup(`
+      <div style="font-family:sans-serif;min-width:190px;">
+        <b style="color:${{col}}">🚨 ${{z.area}}</b><br>
+        <small style="color:#888">${{z.loc}}</small>
+        <hr style="margin:5px 0;border-color:#333">
+        <table style="font-size:0.8rem;width:100%">
+          <tr><td style="color:#888">Risk Level</td>
+              <td><b style="color:${{col}}">${{z.risk.toUpperCase()}}</b></td></tr>
+          <tr><td style="color:#888">Severity</td>
+              <td><b>${{z.si.toFixed(1)}}</b></td></tr>
+          <tr><td style="color:#888">Accidents</td>
+              <td><b>${{z.ta}}</b></td></tr>
+          <tr><td style="color:#888">Fatalities</td>
+              <td><b>${{z.tf}}</b></td></tr>
+          <tr><td style="color:#888">Distance</td>
+              <td><b>${{Math.round(z.dist)}}m away</b></td></tr>
+        </table>
+      </div>`, {{maxWidth:220}}).addTo(map);
+  }});
 
-  // Build popup content
-  let nearbyHTML = '';
+  // Build the searched-pin popup
+  let zonesHTML = '';
   if (nearby.length === 0) {{
-    nearbyHTML = `<div style="color:#aaa;font-size:0.78rem;margin-top:6px;">
-                    ✅ No accident zones within 1.5 km</div>`;
+    zonesHTML = `<div style="color:#4caf50;font-size:0.78rem;margin-top:6px;">
+                   ✅ No accident zones within 1.5 km — area appears safe.</div>`;
   }} else {{
-    nearbyHTML = nearby.slice(0, 4).map(z => `
-      <div style="border-top:1px solid #333;margin-top:6px;padding-top:6px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <b style="font-size:0.82rem;">${{z.area}}</b>
-          ${{riskBadge(z.risk, z.si)}}
+    zonesHTML = nearby.slice(0,5).map(z => {{
+      const col = siColor(z.si);
+      return `<div style="border-top:1px solid #2a2a2a;margin-top:5px;padding-top:5px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+          <b style="font-size:0.8rem;color:#eee">${{z.area}}</b>
+          <span style="background:${{col}};color:#000;font-size:0.68rem;font-weight:800;
+                       padding:1px 6px;border-radius:8px;white-space:nowrap;">${{z.risk.toUpperCase()}}</span>
         </div>
-        <div style="color:#aaa;font-size:0.75rem;margin-top:2px;">${{z.loc}}</div>
-        <div style="font-size:0.78rem;margin-top:3px;">
-          📏 <b>${{Math.round(z.dist)}}m</b> away &nbsp;|&nbsp;
-          ⚠️ Severity: <b>${{z.si.toFixed(1)}}</b> &nbsp;|&nbsp;
-          💀 Fatalities: <b>${{z.tf}}</b>
+        <div style="color:#888;font-size:0.72rem;margin:1px 0">${{z.loc}}</div>
+        <div style="font-size:0.75rem;color:#ccc">
+          📏 ${{Math.round(z.dist)}}m &nbsp;·&nbsp;
+          ⚠️ Severity <b style="color:${{col}}">${{z.si.toFixed(1)}}</b> &nbsp;·&nbsp;
+          💀 <b>${{z.tf}}</b> fatalities
         </div>
-      </div>`).join('');
-    if (nearby.length > 4)
-      nearbyHTML += `<div style="color:#aaa;font-size:0.75rem;margin-top:6px;">
-                       +${{nearby.length - 4}} more zones nearby</div>`;
+      </div>`;
+    }}).join('');
+    if (nearby.length > 5)
+      zonesHTML += `<div style="color:#888;font-size:0.72rem;margin-top:5px;">
+                      …and ${{nearby.length-5}} more zone(s) nearby</div>`;
   }}
 
-  const popupHTML = `
-    <div style="min-width:230px;font-family:sans-serif;">
-      <div style="font-size:1rem;font-weight:700;margin-bottom:2px;">📍 Searched Location</div>
-      <div style="color:#aaa;font-size:0.75rem;">
+  const overallCol = nearby.length
+    ? siColor(Math.max(...nearby.map(z => z.si))) : '#4caf50';
+  const overallRisk = nearby.length
+    ? (nearby[0].si > 25 ? 'HIGH' : nearby[0].si > 10 ? 'MEDIUM' : 'LOW') : 'SAFE';
+
+  const popHTML = `
+    <div style="font-family:sans-serif;min-width:240px;max-width:260px;">
+      <div style="font-size:0.95rem;font-weight:700;color:#fff;margin-bottom:2px;">
+        📍 Searched Location
+      </div>
+      <div style="color:#888;font-size:0.72rem;margin-bottom:6px;">
         ${{HLIGHT[0].toFixed(5)}}, ${{HLIGHT[1].toFixed(5)}}
       </div>
-      <div style="font-size:0.8rem;margin-top:4px;">
-        🚨 <b>${{nearby.length}}</b> accident zone(s) within 1.5 km
+      <div style="background:${{overallCol}}22;border-left:3px solid ${{overallCol}};
+                  padding:4px 8px;border-radius:4px;font-size:0.8rem;margin-bottom:4px;">
+        Overall Risk: <b style="color:${{overallCol}}">${{overallRisk}}</b>
+        &nbsp;·&nbsp; <b>${{nearby.length}}</b> zone(s) within 1.5 km
       </div>
-      ${{nearbyHTML}}
+      ${{zonesHTML}}
     </div>`;
 
-  // Big pulsing marker
+  // Pulsing cyan pin for searched location
   L.marker(HLIGHT, {{
     icon: L.divIcon({{
       className: '',
-      html: `<div style="width:22px;height:22px;border-radius:50%;background:#00e5ff;
-                         border:3px solid #fff;box-shadow:0 0 0 4px #00e5ff55;
-                         animation:pulse 1.4s infinite;"></div>
-             <style>@keyframes pulse{{
-               0%{{box-shadow:0 0 0 4px #00e5ff55}}
-               70%{{box-shadow:0 0 0 14px #00e5ff00}}
-               100%{{box-shadow:0 0 0 4px #00e5ff55}}
+      html: `<div style="width:20px;height:20px;border-radius:50%;background:#00e5ff;
+                         border:3px solid #fff;box-shadow:0 0 0 0 #00e5ff88;
+                         animation:srPulse 1.5s infinite;"></div>
+             <style>@keyframes srPulse{{
+               0%  {{box-shadow:0 0 0 0   #00e5ff88}}
+               70% {{box-shadow:0 0 0 12px #00e5ff00}}
+               100%{{box-shadow:0 0 0 0   #00e5ff88}}
              }}</style>`,
-      iconSize: [22, 22], iconAnchor: [11, 11]
+      iconSize:[20,20], iconAnchor:[10,10]
     }})
-  }}).bindPopup(popupHTML, {{maxWidth: 280}}).addTo(map).openPopup();
+  }}).bindPopup(popHTML, {{maxWidth:270}}).addTo(map).openPopup();
   map.setView(HLIGHT, 14);
 }}
 
-// ── LAYER CONTROL — base maps + overlays ─────
-// High-risk / medium-risk / low-risk sub-layers for fine control
-const highRiskLayer   = L.layerGroup().addTo(map);
-const medRiskLayer    = L.layerGroup().addTo(map);
-const lowRiskLayer    = L.layerGroup().addTo(map);
-const trailLayer      = L.layerGroup().addTo(map); // car trail overlay
-// Populate risk sub-layers using the SAME zone markers (no duplicate circles)
-ZONES.forEach(z => {{
-  const col = siColor(z.si);
-  const target = z.si > 25 ? highRiskLayer : z.si > 10 ? medRiskLayer : lowRiskLayer;
-  L.circleMarker([z.lat,z.lng], {{
-    radius:8, color:col, fillColor:col, fillOpacity:0.9, weight:2
-  }}).bindTooltip(z.area).addTo(target);
-}});
-const baseMaps = {{
-  '🌑 Dark (CartoDB)'   : baseDark,
-  '☀️ Light (CartoDB)'  : baseLight,
-  '🗺️ Street (OSM)'     : baseStreet,
-  '🛰️ Satellite (Esri)' : baseSatellite,
-  '🏔️ Topo (OpenTopo)'  : baseTopo,
-}};
-const overlayMaps = {{
-  '🚨 All Accident Zones' : zoneLayer,
-  '🔴 High Risk Zones'    : highRiskLayer,
-  '🟠 Medium Risk Zones'  : medRiskLayer,
-  '🟡 Low Risk Zones'     : lowRiskLayer,
-  '🛣️ Driver Paths'       : pathLayer,
-  '🔵 Car Trail'          : trailLayer,
-}};
-L.control.layers(baseMaps, overlayMaps, {{collapsed:false, position:'topright'}}).addTo(map);
+// ── LAYER CONTROL ─────────────────────────────
+L.control.layers(null, {{
+  'Accident Zones': zoneLayer,
+  'Driver Paths'  : pathLayer,
+}}, {{collapsed:false}}).addTo(map);
 
 // ── LEGEND ───────────────────────────────────
 const legend = L.control({{position:'bottomright'}});
@@ -470,93 +460,45 @@ legend.onAdd = () => {{
 }};
 legend.addTo(map);
 
-// ── MOVING CAR SIMULATION — one continuous smooth route through ALL zones ──
-if (SHOW_CAR && ZONES.length > 0) {{
+// ── MOVING CAR SIMULATION ─────────────────────
+if (SHOW_CAR && PATHS.length > 0) {{
 
-  // ─── Step 1: nearest-neighbour sort of zones from map center ───────────
-  // This gives one logical geographic ordering — no jumps
-  function nnSort(startPt, zones) {{
-    const rem = zones.map((z,i) => ({{z, i}}));
-    const out = [];
-    let cur = startPt;
-    while (rem.length) {{
-      let best = 0, bestD = Infinity;
-      rem.forEach((item, idx) => {{
-        const d = haversineM(cur[0], cur[1], item.z.lat, item.z.lng);
-        if (d < bestD) {{ bestD = d; best = idx; }}
-      }});
-      out.push(rem.splice(best, 1)[0].z);
-      cur = [out[out.length-1].lat, out[out.length-1].lng];
-    }}
-    return out;
-  }}
+  // Count total points across all paths to compute per-step delay for ~30s total
+  const totalPts = PATHS.reduce((s,p) => s + (p.coords ? p.coords.length : 0), 0);
+  const TARGET_MS = 30000; // 30 seconds total journey
+  const BASE_DELAY = totalPts > 0 ? Math.max(50, Math.floor(TARGET_MS / totalPts)) : 200;
 
-  // ─── Step 2: densify between two points (smooth curve via extra pts) ───
-  function densify(a, b, n) {{
-    const pts = [];
-    for (let i = 1; i <= n; i++) {{
-      const t = i / (n + 1);
-      // Slight arc: offset midpoint perpendicular for natural feel
-      const midLat = a[0] + (b[0]-a[0]) * t;
-      const midLng = a[1] + (b[1]-a[1]) * t;
-      pts.push([midLat, midLng]);
-    }}
-    return pts;
-  }}
-
-  // ─── Step 3: build ONE continuous route visiting every zone ────────────
-  const startPt = PATHS.length && PATHS[0].coords && PATHS[0].coords.length
-    ? PATHS[0].coords[0]
-    : [ZONES[0].lat, ZONES[0].lng];
-
-  const orderedZones = nnSort(startPt, [...ZONES]);
-  const INTERP = 80; // interpolation points between zones → ultra-smooth
-
-  const allCoords = [startPt];
-  let prev = startPt;
-
-  orderedZones.forEach(z => {{
-    const next = [z.lat, z.lng];
-    densify(prev, next, INTERP).forEach(p => allCoords.push(p));
-    allCoords.push(next);
-    prev = next;
-  }});
-
-  // Return to start for loop (optional: remove last 2 lines to not loop)
-  densify(prev, startPt, INTERP).forEach(p => allCoords.push(p));
-  allCoords.push(startPt);
-
-  const totalPts = allCoords.length;
-
-  // ─── Step 4: draw the full route as a guide polyline ──────────────────
-  L.polyline(allCoords, {{
-    color:'#00e5ff', weight:2.5, opacity:0.35, dashArray:'5 7'
-  }}).bindPopup(`<b>🛣️ Full Route — ${{orderedZones.length}} zones</b>`).addTo(pathLayer);
-
-  // ─── Step 5: car marker ────────────────────────────────────────────────
-  const carMarker = L.marker(allCoords[0], {{
-    icon: L.divIcon({{
-      className: 'car-icon',
+  // Single clean car icon — no background div, just emoji with glow
+  function makeCarIcon() {{
+    return L.divIcon({{
+      className: 'car-icon',   // must be non-empty string to avoid Leaflet adding extra class
       html: `<span style="font-size:22px;line-height:1;display:block;
                           filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
       popupAnchor: [0, -14]
-    }}),
+    }});
+  }}
+
+  // Car marker — placed at start, NO trail yet
+  const carMarker = L.marker(PATHS[0].coords[0], {{
+    icon: makeCarIcon(),
     zIndexOffset: 1000
   }}).addTo(map);
 
-  // Trail line
+  // Trail line — empty at start, grows as car moves
   const trailPts  = [];
-  const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(trailLayer);
+  const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(map);
 
-  // ─── Step 6: zone alert checker ───────────────────────────────────────
+  // Per-zone alert state
   const zoneState = {{}};
+
   function checkZones(lat, lng) {{
     ZONES.forEach(z => {{
       const dist      = haversineM(lat, lng, z.lat, z.lng);
       const prev      = zoneState[z.id] || null;
       const riskLevel = z.risk ? z.risk.toUpperCase() : 'RISK';
+
       if (dist <= ENTER_R) {{
         if (prev !== 'entered') {{
           zoneState[z.id] = 'entered';
@@ -568,12 +510,13 @@ if (SHOW_CAR && ZONES.length > 0) {{
         }}
       }} else if (dist <= APPROACH_R) {{
         if (prev === 'entered') {{
-          // Car just exited the zone — show LEFT, never Approaching
-          zoneState[z.id] = 'exited';
-          addAlert(`✅ Left ${{riskLevel}} Risk Zone — Safe: ${{z.area}}`,
-                   `✅ <b>Left ${{riskLevel}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`, 'left');
-        }} else if (prev !== 'approaching' && prev !== 'exited') {{
-          // Car is newly approaching — only if not already approaching and not just exited
+          zoneState[z.id] = null;
+          addAlert(
+            `✅ Left ${{riskLevel}} Risk Zone — Safe: ${{z.area}}`,
+            `✅ <b>Left ${{riskLevel}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`,
+            'left'
+          );
+        }} else if (prev !== 'approaching') {{
           zoneState[z.id] = 'approaching';
           addAlert(
             `⚠️ Approaching ${{riskLevel}} Risk Zone: ${{z.area}} (${{Math.round(dist)}}m)`,
@@ -583,62 +526,65 @@ if (SHOW_CAR && ZONES.length > 0) {{
         }}
       }} else {{
         if (prev === 'entered') {{
-          // Jumped past approach ring directly — still show Left
           zoneState[z.id] = null;
-          addAlert(`✅ Left ${{riskLevel}} Risk Zone — Safe: ${{z.area}}`,
-                   `✅ <b>Left ${{riskLevel}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`, 'left');
-        }} else if (prev === 'approaching' || prev === 'exited') {{
-          // Fully clear — reset state so zone can trigger again next visit
+          addAlert(
+            `✅ Left ${{riskLevel}} Risk Zone — Safe: ${{z.area}}`,
+            `✅ <b>Left ${{riskLevel}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`,
+            'left'
+          );
+        }} else if (prev === 'approaching') {{
           zoneState[z.id] = null;
         }}
       }}
     }});
   }}
 
-  // ─── Step 7: RAF animation — each segment = fixed time slice ──────────
-  const TARGET_MS = 45000; // 45s total for all zones
-  const SEG_MS    = Math.max(30, TARGET_MS / Math.max(totalPts - 1, 1));
-  let segIdx  = 0;
-  let segStart = null;
+  let pathIdx = 0, ptIdx = 0;
 
-  function animateSeg(ts) {{
-    if (segIdx >= allCoords.length - 1) {{
-      carMarker.setLatLng(allCoords[allCoords.length - 1]);
+  function step() {{
+    if (pathIdx >= PATHS.length) {{
+      // Simulation done
       carMarker.setIcon(L.divIcon({{
         className: 'car-icon',
         html: `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
         iconSize:[24,24], iconAnchor:[12,12]
       }}));
-      addAlert('🏁 All zones visited!', '🏁 <b>Simulation complete — All ${{orderedZones.length}} zones visited!</b>', 'safe');
+      addAlert('🏁 Destination reached!', '🏁 <b>Simulation complete — Destination reached safely!</b>', 'safe');
       return;
     }}
 
-    if (segStart === null) segStart = ts;
-    const t = Math.min((ts - segStart) / SEG_MS, 1);
+    const coords = PATHS[pathIdx].coords;
+    if (ptIdx >= coords.length) {{
+      pathIdx++;
+      ptIdx = 0;
+      if (pathIdx < PATHS.length)
+        addAlert(`🟢 Path #${{PATHS[pathIdx].id}}`, `🟢 <b>Continuing to Path #${{PATHS[pathIdx].id}}</b>`, 'safe');
+      setTimeout(step, BASE_DELAY);
+      return;
+    }}
 
-    const a = allCoords[segIdx];
-    const b = allCoords[segIdx + 1];
-    const lat = a[0] + (b[0] - a[0]) * t;
-    const lng = a[1] + (b[1] - a[1]) * t;
+    const [lat, lng] = coords[ptIdx];
 
+    // Move car
     carMarker.setLatLng([lat, lng]);
+
+    // Grow trail — only from this point onward
     trailPts.push([lat, lng]);
     trailLine.setLatLngs(trailPts);
 
+    // Pan map gently to follow car
     if (!map.getBounds().contains([lat, lng]))
-      map.panTo([lat, lng], {{animate:true, duration:0.4, easeLinearity:0.5}});
+      map.panTo([lat, lng], {{animate:true, duration:0.5, easeLinearity:0.5}});
 
     checkZones(lat, lng);
-
-    if (t >= 1) {{ segIdx++; segStart = null; }}
-    requestAnimationFrame(animateSeg);
+    ptIdx++;
+    setTimeout(step, BASE_DELAY);
   }}
 
-  // Start
-  map.setView(allCoords[0], 13);
-  addAlert('🟢 Simulation started',
-    `🟢 <b>Simulation started — visiting ${{orderedZones.length}} zones smoothly</b>`, 'safe');
-  setTimeout(() => requestAnimationFrame(animateSeg), 500);
+  // Zoom to start of path before beginning
+  map.setView(PATHS[0].coords[0], 14);
+  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — Path #${{PATHS[0].id}} | ${{totalPts}} steps | ~30s journey</b>`, 'safe');
+  setTimeout(step, 500); // small delay so map settles before car moves
 }}
 </script>
 </body>
