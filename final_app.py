@@ -173,8 +173,8 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 <head>
 <meta charset="utf-8"/>
 <title>Road Risk Map</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * {{ box-sizing:border-box; margin:0; padding:0; }}
   body, html {{ height:100%; background:#0e1117; font-family:sans-serif; }}
@@ -261,23 +261,30 @@ const ENTER_R    = 120;
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
 
-// ── BASE MAP LAYERS ───────────────────────────
-const baseDark = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
-}});
-const baseLight = L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
-}});
-const baseStreet = L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-  attribution:'© OpenStreetMap contributors', maxZoom:19
-}});
-const baseSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}', {{
-  attribution:'© Esri World Imagery', maxZoom:19
-}});
-const baseTopo = L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png', {{
-  attribution:'© OpenTopoMap contributors', maxZoom:17
-}});
-baseDark.addTo(map); // default base
+// ── BASE MAP TILE LAYERS (5 options matching image) ───
+const baseDark = L.tileLayer(
+  'https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+  {{attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19}}
+);
+const baseLight = L.tileLayer(
+  'https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+  {{attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19}}
+);
+const baseStreet = L.tileLayer(
+  'https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
+  {{attribution:'© OpenStreetMap contributors', maxZoom:19}}
+);
+const baseSatellite = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}',
+  {{attribution:'© Esri World Imagery', maxZoom:19}}
+);
+const baseTopo = L.tileLayer(
+  'https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',
+  {{attribution:'© OpenStreetMap contributors, © OpenTopoMap', subdomains:'abc', maxZoom:17}}
+);
+
+// Start with Dark as default
+baseDark.addTo(map);
 
 // ── HELPERS ──────────────────────────────────
 function siColor(si) {{
@@ -366,19 +373,7 @@ if (HLIGHT) {{
   map.setView(HLIGHT, 14);
 }}
 
-// ── LAYER CONTROL — base maps + overlays ─────
-// High-risk / medium-risk / low-risk sub-layers for fine control
-const highRiskLayer   = L.layerGroup().addTo(map);
-const medRiskLayer    = L.layerGroup().addTo(map);
-const lowRiskLayer    = L.layerGroup().addTo(map);
-const trailLayer      = L.layerGroup().addTo(map); // car trail overlay
-ZONES.forEach(z => {{
-  const col = siColor(z.si);
-  const target = z.si > 25 ? highRiskLayer : z.si > 10 ? medRiskLayer : lowRiskLayer;
-  L.circle([z.lat,z.lng], {{
-    radius:50, color:col, fillColor:col, fillOpacity:0.35, weight:2
-  }}).addTo(target);
-}});
+// ── LAYER CONTROL (Base Maps + Overlays) ──────
 const baseMaps = {{
   '🌑 Dark (CartoDB)'   : baseDark,
   '☀️ Light (CartoDB)'  : baseLight,
@@ -387,12 +382,8 @@ const baseMaps = {{
   '🏔️ Topo (OpenTopo)'  : baseTopo,
 }};
 const overlayMaps = {{
-  '🚨 All Accident Zones' : zoneLayer,
-  '🔴 High Risk Zones'    : highRiskLayer,
-  '🟠 Medium Risk Zones'  : medRiskLayer,
-  '🟡 Low Risk Zones'     : lowRiskLayer,
-  '🛣️ Driver Paths'       : pathLayer,
-  '🔵 Car Trail'          : trailLayer,
+  '🚨 Accident Zones' : zoneLayer,
+  '🛣️ Driver Paths'   : pathLayer,
 }};
 L.control.layers(baseMaps, overlayMaps, {{collapsed:false, position:'topright'}}).addTo(map);
 
@@ -410,34 +401,35 @@ legend.onAdd = () => {{
 }};
 legend.addTo(map);
 
-// ── MOVING CAR SIMULATION — smooth RAF interpolation ─────────────────
+// ── MOVING CAR SIMULATION ─────────────────────
 if (SHOW_CAR && PATHS.length > 0) {{
 
-  // Flatten ALL path coords into one continuous route
-  const allCoords = [];
-  PATHS.forEach(p => {{ if (p.coords) allCoords.push(...p.coords); }});
-  const totalPts = allCoords.length;
-
   // Count total points across all paths to compute per-step delay for ~30s total
+  const totalPts = PATHS.reduce((s,p) => s + (p.coords ? p.coords.length : 0), 0);
   const TARGET_MS = 30000; // 30 seconds total journey
   const BASE_DELAY = totalPts > 0 ? Math.max(50, Math.floor(TARGET_MS / totalPts)) : 200;
 
-  // Car marker — placed at start, NO trail yet
-  const carMarker = L.marker(PATHS[0].coords[0], {{
-    icon: L.divIcon({{
-      className: 'car-icon',
+  // Single clean car icon — no background div, just emoji with glow
+  function makeCarIcon() {{
+    return L.divIcon({{
+      className: 'car-icon',   // must be non-empty string to avoid Leaflet adding extra class
       html: `<span style="font-size:22px;line-height:1;display:block;
                           filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
       popupAnchor: [0, -14]
-    }}),
+    }});
+  }}
+
+  // Car marker — placed at start, NO trail yet
+  const carMarker = L.marker(PATHS[0].coords[0], {{
+    icon: makeCarIcon(),
     zIndexOffset: 1000
   }}).addTo(map);
 
-  // Trail line — empty at start, grows as car moves (also added to trailLayer overlay)
+  // Trail line — empty at start, grows as car moves
   const trailPts  = [];
-  const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(trailLayer);
+  const trailLine = L.polyline([], {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(map);
 
   // Per-zone alert state
   const zoneState = {{}};
@@ -488,16 +480,11 @@ if (SHOW_CAR && PATHS.length > 0) {{
     }});
   }}
 
-  // ── Smooth RAF interpolation between every pair of waypoints ──────────
-  // Each segment takes exactly SEG_MS milliseconds → silky smooth
-  const SEG_MS = Math.max(80, Math.floor(TARGET_MS / Math.max(totalPts - 1, 1)));
-  let segIdx   = 0;   // which segment we're currently animating
-  let segStart = null; // timestamp when current segment began
+  let pathIdx = 0, ptIdx = 0;
 
-  function animateSeg(ts) {{
-    if (segIdx >= allCoords.length - 1) {{
-      // Journey complete
-      carMarker.setLatLng(allCoords[allCoords.length - 1]);
+  function step() {{
+    if (pathIdx >= PATHS.length) {{
+      // Simulation done
       carMarker.setIcon(L.divIcon({{
         className: 'car-icon',
         html: `<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
@@ -507,39 +494,38 @@ if (SHOW_CAR && PATHS.length > 0) {{
       return;
     }}
 
-    if (segStart === null) segStart = ts;
-    const elapsed = ts - segStart;
-    const t = Math.min(elapsed / SEG_MS, 1); // 0 → 1 progress within this segment
+    const coords = PATHS[pathIdx].coords;
+    if (ptIdx >= coords.length) {{
+      pathIdx++;
+      ptIdx = 0;
+      if (pathIdx < PATHS.length)
+        addAlert(`🟢 Path #${{PATHS[pathIdx].id}}`, `🟢 <b>Continuing to Path #${{PATHS[pathIdx].id}}</b>`, 'safe');
+      setTimeout(step, BASE_DELAY);
+      return;
+    }}
 
-    const a = allCoords[segIdx];
-    const b = allCoords[segIdx + 1];
+    const [lat, lng] = coords[ptIdx];
 
-    // Linear interpolation lat/lng
-    const lat = a[0] + (b[0] - a[0]) * t;
-    const lng = a[1] + (b[1] - a[1]) * t;
-
+    // Move car
     carMarker.setLatLng([lat, lng]);
+
+    // Grow trail — only from this point onward
     trailPts.push([lat, lng]);
     trailLine.setLatLngs(trailPts);
 
+    // Pan map gently to follow car
     if (!map.getBounds().contains([lat, lng]))
-      map.panTo([lat, lng], {{animate:true, duration:0.4, easeLinearity:0.5}});
+      map.panTo([lat, lng], {{animate:true, duration:0.5, easeLinearity:0.5}});
 
     checkZones(lat, lng);
-
-    if (t >= 1) {{
-      // Segment done — move to next
-      segIdx++;
-      segStart = null;
-    }}
-
-    requestAnimationFrame(animateSeg);
+    ptIdx++;
+    setTimeout(step, BASE_DELAY);
   }}
 
-  // Zoom to start then begin
+  // Zoom to start of path before beginning
   map.setView(PATHS[0].coords[0], 14);
-  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — Path #${{PATHS[0].id}} | ${{totalPts}} waypoints | smooth RAF animation</b>`, 'safe');
-  setTimeout(() => requestAnimationFrame(animateSeg), 500);
+  addAlert(`🟢 Simulation started`, `🟢 <b>Simulation started — Path #${{PATHS[0].id}} | ${{totalPts}} steps | ~30s journey</b>`, 'safe');
+  setTimeout(step, 500); // small delay so map settles before car moves
 }}
 </script>
 </body>
