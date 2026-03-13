@@ -261,30 +261,23 @@ const ENTER_R    = 120;
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
 
-// ── BASE MAP TILE LAYERS (5 options matching image) ───
-const baseDark = L.tileLayer(
-  'https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',
-  {{attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19}}
-);
-const baseLight = L.tileLayer(
-  'https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
-  {{attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19}}
-);
-const baseStreet = L.tileLayer(
-  'https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
-  {{attribution:'© OpenStreetMap contributors', maxZoom:19}}
-);
-const baseSatellite = L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}',
-  {{attribution:'© Esri World Imagery', maxZoom:19}}
-);
-const baseTopo = L.tileLayer(
-  'https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',
-  {{attribution:'© OpenStreetMap contributors, © OpenTopoMap', subdomains:'abc', maxZoom:17}}
-);
+// ── 5 BASE MAP TILE LAYERS ────────────────────
+const baseLayers = {{
+  'dark'      : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+                  {{attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19}}),
+  'light'     : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',
+                  {{attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19}}),
+  'street'    : L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
+                  {{attribution:'© OpenStreetMap contributors', maxZoom:19}}),
+  'satellite' : L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}',
+                  {{attribution:'© Esri World Imagery', maxZoom:19}}),
+  'topo'      : L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',
+                  {{attribution:'© OpenStreetMap © OpenTopoMap', subdomains:'abc', maxZoom:17}}),
+}};
 
-// Start with Dark as default
-baseDark.addTo(map);
+// ── RESTORE last selected layer from localStorage (survives Start/Stop rerun) ──
+const savedLayer = localStorage.getItem('riskmap_baselayer') || 'dark';
+baseLayers[savedLayer].addTo(map);
 
 // ── HELPERS ──────────────────────────────────
 function siColor(si) {{
@@ -374,18 +367,31 @@ if (HLIGHT) {{
 }}
 
 // ── LAYER CONTROL (Base Maps + Overlays) ──────
-const baseMaps = {{
-  '🌑 Dark (CartoDB)'   : baseDark,
-  '☀️ Light (CartoDB)'  : baseLight,
-  '🗺️ Street (OSM)'     : baseStreet,
-  '🛰️ Satellite (Esri)' : baseSatellite,
-  '🏔️ Topo (OpenTopo)'  : baseTopo,
+const baseMapControl = {{
+  '🌑 Dark (CartoDB)'   : baseLayers['dark'],
+  '☀️ Light (CartoDB)'  : baseLayers['light'],
+  '🗺️ Street (OSM)'     : baseLayers['street'],
+  '🛰️ Satellite (Esri)' : baseLayers['satellite'],
+  '🏔️ Topo (OpenTopo)'  : baseLayers['topo'],
 }};
-const overlayMaps = {{
+const overlayControl = {{
   '🚨 Accident Zones' : zoneLayer,
   '🛣️ Driver Paths'   : pathLayer,
 }};
-L.control.layers(baseMaps, overlayMaps, {{collapsed:false, position:'topright'}}).addTo(map);
+L.control.layers(baseMapControl, overlayControl, {{collapsed:false, position:'topright'}}).addTo(map);
+
+// ── SAVE selected base layer to localStorage so it survives st.rerun() ──
+map.on('baselayerchange', function(e) {{
+  const nameToKey = {{
+    '🌑 Dark (CartoDB)'   : 'dark',
+    '☀️ Light (CartoDB)'  : 'light',
+    '🗺️ Street (OSM)'     : 'street',
+    '🛰️ Satellite (Esri)' : 'satellite',
+    '🏔️ Topo (OpenTopo)'  : 'topo',
+  }};
+  const key = nameToKey[e.name];
+  if (key) localStorage.setItem('riskmap_baselayer', key);
+}});
 
 // ── LEGEND ───────────────────────────────────
 const legend = L.control({{position:'bottomright'}});
