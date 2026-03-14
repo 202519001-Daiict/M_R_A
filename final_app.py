@@ -126,9 +126,11 @@ def resolve_location(query: str, accident_df: pd.DataFrame):
             return la, ln, f"{la:.5f}, {ln:.5f}"
     ql = q.lower()
     for _, row in accident_df.iterrows():
-        if (ql in str(row.get("area","")).lower() or
-            ql in str(row.get("location","")).lower() or
-            ql in str(row.get("city","")).lower()):
+        area = str(row.get("area","")).lower().strip()
+        # Exact match: query must equal the area field exactly (case-insensitive)
+        # This prevents "Andheri" from matching rows where area="Pantnagar"
+        # just because location contains "Andheri Link Rd"
+        if ql == area:
             return float(row["latitude"]), float(row["longitude"]), \
                    f"{row.get('area','')} — {row.get('location','')}"
     return _nominatim(q)
@@ -649,9 +651,9 @@ def main():
                  "si":float(r.get("severity_index",0)),"risk":str(r.get("risk_level","Low")),
                  "ta":int(r.get("total_accident",0)),"tf":int(r.get("total_fatality",0))}
                 for _,r in accident_df.iterrows()
-                if ql in str(r.get("area","")).lower()
-                or ql in str(r.get("location","")).lower()
-                or ql in str(r.get("city","")).lower()
+                # Match ONLY on area field, exact equality — prevents "Andheri" from
+                # matching Pantnagar rows whose location contains "Andheri Link Rd"
+                if ql == str(r.get("area","")).lower().strip()
             ]
             st.session_state.search_zones = matched if matched else None
             st.session_state.search_error = ""
