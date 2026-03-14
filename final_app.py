@@ -647,8 +647,11 @@ def main():
             matched = [
                 {"id":int(r["id"]),"lat":float(r["latitude"]),"lng":float(r["longitude"]),
                  "area":str(r.get("area","")),"loc":str(r.get("location","")),
-                 "si":float(r.get("severity_index",0)),"risk":str(r.get("risk_level","Low")),
-                 "ta":int(r.get("total_accident",0)),"tf":int(r.get("total_fatality",0))}
+                 "location":str(r.get("location","")),"city":str(r.get("city","")),
+                 "si":float(r.get("severity_index",0)),"severity_index":float(r.get("severity_index",0)),
+                 "risk":str(r.get("risk_level","Low")),"risk_level":str(r.get("risk_level","Low")),
+                 "ta":int(r.get("total_accident",0)),"total_accident":int(r.get("total_accident",0)),
+                 "tf":int(r.get("total_fatality",0)),"total_fatality":int(r.get("total_fatality",0))}
                 for _,r in accident_df.iterrows()
                 if ql == str(r.get("area","")).lower().strip()
             ]
@@ -689,10 +692,15 @@ def main():
         st.caption(f"**{st.session_state.highlight_label}**")
         if ri:
             alert_box(ri["level"], ri["message"])
-        # Show ONLY the exact matched zones — not nearby radius zones
-        near_df = pd.DataFrame(matched_zones)[
-            ["area","location","risk_level","severity_index","total_accident","total_fatality"]
-        ].sort_values("severity_index", ascending=False)
+        # Build display df safely using .get() — works regardless of which key names exist
+        near_df = pd.DataFrame([{
+            "Area":           z.get("area", ""),
+            "Location":       z.get("location", z.get("loc", "")),
+            "Risk Level":     z.get("risk_level", z.get("risk", "")),
+            "Severity Index": z.get("severity_index", z.get("si", 0)),
+            "Accidents":      z.get("total_accident", z.get("ta", 0)),
+            "Fatalities":     z.get("total_fatality", z.get("tf", 0)),
+        } for z in matched_zones]).sort_values("Severity Index", ascending=False)
         st.dataframe(near_df, use_container_width=True, hide_index=True)
 
     st.subheader("🗺️ Interactive Risk Map  •  🚗 Live Car Simulation")
