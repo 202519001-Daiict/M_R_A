@@ -643,7 +643,12 @@ def main():
             st.session_state.highlight_point = (lat, lon)
             st.session_state.highlight_label = label
             st.session_state.search_query    = address_input.strip()
-            st.session_state.risk_info       = check_risk_at_point(lat, lon, accident_df, 1500)
+            st.session_state.risk_info = check_risk_at_point(lat, lon, accident_df, 1500) if not matched else {
+                "level": "HIGH" if any(z["risk"].lower()=="high" for z in matched) else
+                         "MEDIUM" if any(z["risk"].lower()=="medium" for z in matched) else "LOW",
+                "zones": matched,
+                "message": f"{len(matched)} exact zone(s) found for '{address_input.strip()}'"
+            }
             ql = address_input.strip().lower()
             matched = [
                 {"id":int(r["id"]),"lat":float(r["latitude"]),"lng":float(r["longitude"]),
@@ -679,16 +684,18 @@ def main():
     if st.session_state.search_error:
         st.error(st.session_state.search_error)
 
-    if st.session_state.highlight_point and st.session_state.risk_info:
+    if st.session_state.highlight_point and st.session_state.search_zones:
         ri = st.session_state.risk_info
+        matched_zones = st.session_state.search_zones
         st.subheader("📊 Risk Assessment")
         st.caption(f"**{st.session_state.highlight_label}**")
-        alert_box(ri["level"], ri["message"])
-        if ri["zones"]:
-            near_df = pd.DataFrame(ri["zones"])[
-                ["area","location","risk_level","severity_index","total_accident","total_fatality","distance_m"]
-            ].sort_values("distance_m")
-            st.dataframe(near_df, use_container_width=True, hide_index=True)
+        if ri:
+            alert_box(ri["level"], ri["message"])
+        # Show ONLY the exact matched zones — not nearby radius zones
+        near_df = pd.DataFrame(matched_zones)[
+            ["area","location","risk_level","severity_index","total_accident","total_fatality"]
+        ].sort_values("severity_index", ascending=False)
+        st.dataframe(near_df, use_container_width=True, hide_index=True)
 
     st.subheader("🗺️ Interactive Risk Map  •  🚗 Live Car Simulation")
     st.caption("Car moves along the driver path. Alert bar at bottom shows real-time zone alerts.")
