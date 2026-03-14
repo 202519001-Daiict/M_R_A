@@ -9,6 +9,7 @@ import pandas as pd
 import json
 import struct
 import psycopg2
+import requests
 from psycopg2.extras import RealDictCursor
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
@@ -74,12 +75,15 @@ def load_driver_path() -> list:
     conn.close()
     all_paths = []
     for row in rows:
-        coords = decode_wkb_linestring(str(row.get("geom", "")))
-        if coords:
+        raw_coords = decode_wkb_linestring(str(row.get("geom", "")))
+        if raw_coords:
+            # Snap to actual road geometry via OSRM
+            road_coords = snap_path_to_roads(raw_coords)
             all_paths.append({
-                "id": row.get("id"),
-                "created_at": str(row.get("created_at", "")),
-                "coordinates": coords
+                "id":          row.get("id"),
+                "created_at":  str(row.get("created_at", "")),
+                "coordinates": road_coords,
+                "raw_coords":  raw_coords,   # keep originals for fallback
             })
     return all_paths
 
@@ -104,7 +108,63 @@ def decode_wkb_linestring(hex_wkb: str) -> list:
         return []
 
 # ─────────────────────────────────────────────
-# 4. SMART LOCATION RESOLVER
+# 3b. OSRM ROAD SNAPPING
+# Uses the public OSRM demo server to convert raw GPS waypoints
+# into road-following geometry. Falls back to raw waypoints if
+# the API is unavailable (offline / rate-limited).
+# ─────────────────────────────────────────────
+@st.cache_data(ttl=3600, show_spinner="Snapping path to roads...")
+def snap_path_to_roads(coords: list) -> list:
+    """
+    Takes a list of [lat, lng] waypoints from the DB and returns a
+    denser list of [lat, lng] points that follow actual road geometry.
+
+    Strategy: chunk the waypoints into groups of 10 (OSRM limit is 100
+    but we keep it small to stay within the free-tier timeout), call
+    OSRM for each chunk, concatenate the road geometries.
+    """
+    if not coords or len(coords) < 2:
+        return coords
+
+    # Convert [lat, lng] → "lng,lat" for OSRM
+    def to_osrm(c):
+        return f"{c[1]},{c[0]}"
+
+    road_coords = []
+    chunk_size  = 10   # waypoints per OSRM call
+    timeout     = 8    # seconds
+
+    try:
+        for i in range(0, len(coords) - 1, chunk_size - 1):
+            chunk = coords[i : i + chunk_size]
+            if len(chunk) < 2:
+                break
+
+            coord_str = ";".join(to_osrm(c) for c in chunk)
+            url = (
+                f"http://router.project-osrm.org/route/v1/driving/{coord_str}"
+                f"?overview=full&geometries=geojson&steps=false"
+            )
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+
+            if data.get("code") != "Ok":
+                # OSRM couldn't route this chunk — use raw waypoints
+                road_coords.extend(chunk)
+                continue
+
+            # GeoJSON coords are [lng, lat] — flip to [lat, lng]
+            geom = data["routes"][0]["geometry"]["coordinates"]
+            road_coords.extend([lat_lng[1], lat_lng[0]] for lat_lng in geom)
+
+        return road_coords if road_coords else coords
+
+    except Exception:
+        # Any failure (network, timeout, bad response) → fall back gracefully
+        return coords
+
+
 # ─────────────────────────────────────────────
 import re
 
@@ -402,17 +462,23 @@ ZONES.forEach(z=>{{
   .addTo(zoneLayer);
 }});
 
+
 // ── DRIVER PATHS ──────────────────────────────
+// coords are now road-snapped via OSRM — the polyline follows actual streets
 const pathLayer = L.layerGroup().addTo(map);
 const PATH_COLORS = ['#00e5ff','#69ff47','#ff4081','#e040fb','#ffab40'];
 PATHS.forEach((p,i) => {{
   if (!p.coords || p.coords.length < 2) return;
   const col = PATH_COLORS[i % PATH_COLORS.length];
-  // Draw path line (dashed guide)
-  L.polyline(p.coords, {{color:col, weight:4, opacity:0.55, dashArray:'8 5'}})
-   .bindPopup(`<b>Driver Path #${{p.id}}</b> — ${{p.coords.length}} points`)
+  // Solid road-following line (no dash — road geometry is already detailed)
+  L.polyline(p.coords, {{color:col, weight:4, opacity:0.65}})
+   .bindPopup(`<b>🛣️ Driver Path #${{p.id}}</b><br><small>${{p.coords.length}} road points</small>`)
    .addTo(pathLayer);
-  // End marker only (start is where car begins — no dot there to avoid duplicate)
+  // Start marker
+  L.circleMarker(p.coords[0], {{
+    radius:7, color:'#00c853', fillColor:'#00c853', fillOpacity:1, weight:2
+  }}).bindTooltip('🟢 Start').addTo(pathLayer);
+  // End marker
   L.circleMarker(p.coords[p.coords.length-1], {{
     radius:7, color:'#d50000', fillColor:'#d50000', fillOpacity:1, weight:2
   }}).bindTooltip('🔴 Destination').addTo(pathLayer);
@@ -480,15 +546,21 @@ if (SHOW_CAR && PATHS.length > 0) {{
     iconSize:[24,24], iconAnchor:[12,12], popupAnchor:[0,-14]
   }});
 
-  // Build 5m-interpolated path — deterministic same array every rebuild
+  // Use road-snapped coords directly from OSRM — already dense (~10-20m spacing).
+  // Light interpolation only fills gaps > 30m (rare, e.g. tunnel/bridge sections
+  // where OSRM returns fewer points). This keeps the car on the road visually.
   const allC=[]; PATHS.forEach(p=>{{if(p.coords)allC.push(...p.coords);}});
   const ic=[];
-  for(let i=0;i<allC.length-1;i++){{
-    const[la1,ln1]=allC[i],[la2,ln2]=allC[i+1];
+  function hav2(la1,ln1,la2,ln2){{
     const R=6371000,dL=(la2-la1)*Math.PI/180,dl=(ln2-ln1)*Math.PI/180,
           a=Math.sin(dL/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dl/2)**2;
-    const seg=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-    const n=Math.max(1,Math.round(seg/5));
+    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+  }}
+  for(let i=0;i<allC.length-1;i++){{
+    const[la1,ln1]=allC[i],[la2,ln2]=allC[i+1];
+    const seg=hav2(la1,ln1,la2,ln2);
+    // Only interpolate if gap > 30m (OSRM usually gives ~10-15m spacing)
+    const n = seg > 30 ? Math.round(seg/10) : 1;
     for(let s=0;s<n;s++){{const t=s/n;ic.push([la1+(la2-la1)*t,ln1+(ln2-ln1)*t]);}}
   }}
   ic.push(allC[allC.length-1]);
