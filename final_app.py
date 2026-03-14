@@ -303,9 +303,15 @@ const LS_TRAIL  = 'riskmap_trail';
 // preferCanvas MUST be false — it breaks divIcon (causes ghost/duplicate car)
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
-L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-  attribution:'© OpenStreetMap © CartoDB', subdomains:'abcd', maxZoom:19
-}}).addTo(map);
+// ── 5 BASE LAYERS + localStorage persistence ──
+const BL = {{
+  dark     : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',   {{attribution:'&copy; OSM &copy; CartoDB',subdomains:'abcd',maxZoom:19}}),
+  light    : L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png',  {{attribution:'&copy; OSM &copy; CartoDB',subdomains:'abcd',maxZoom:19}}),
+  street   : L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',                {{attribution:'&copy; OpenStreetMap contributors',maxZoom:19}}),
+  satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}',{{attribution:'&copy; Esri',maxZoom:19}}),
+  topo     : L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',                  {{attribution:'&copy; OSM &copy; OpenTopoMap',subdomains:'abc',maxZoom:17}}),
+}};
+BL[localStorage.getItem('riskmap_bl')||'dark'].addTo(map);
 
 // ── HELPERS ──────────────────────────────────
 // Use actual DB risk_level field for colors — matches what the table shows
@@ -415,6 +421,45 @@ PATHS.forEach(function(p,i) {{
   L.circleMarker(p.coords[p.coords.length-1], {{radius:7,color:'#d50000',fillColor:'#d50000',fillOpacity:1,weight:2}})
    .bindTooltip('🔴 Destination').addTo(pathLayer);
 }});
+
+// ── SEARCH: zoom to matched zones + open panel ────────────────────
+if(HAS_SEARCH){{
+  const mz=ZONES.filter(z=>SZ_IDS.has(z.id));
+  if(mz.length>0){{
+    const lats=mz.map(z=>z.lat),lngs=mz.map(z=>z.lng);
+    map.fitBounds(
+      [[Math.min(...lats)-0.008,Math.min(...lngs)-0.008],
+       [Math.max(...lats)+0.008,Math.max(...lngs)+0.008]],
+      {{padding:[40,40],maxZoom:15,animate:true,duration:0.8}}
+    );
+    setTimeout(openSR,900);
+  }}
+}}
+
+// ── LAYER CONTROL — 5 base maps + overlays ────
+L.control.layers(
+  {{'🌑 Dark':BL.dark,'☀️ Light':BL.light,'🗺️ Street':BL.street,'🛰️ Satellite':BL.satellite,'🏔️ Topo':BL.topo}},
+  {{'🚨 Accident Zones':zoneLayer,'🛣️ Driver Paths':pathLayer}},
+  {{collapsed:false,position:'topright'}}
+).addTo(map);
+map.on('baselayerchange',e=>{{
+  const k={{'🌑 Dark':'dark','☀️ Light':'light','🗺️ Street':'street','🛰️ Satellite':'satellite','🏔️ Topo':'topo'}}[e.name];
+  if(k)localStorage.setItem('riskmap_bl',k);
+}});
+
+// ── LEGEND ────────────────────────────────────
+const legend=L.control({{position:'bottomright'}});
+legend.onAdd=()=>{{
+  const d=L.DomUtil.create('div','legend');
+  d.innerHTML=`<h4>🗺 Legend</h4>
+    <span class="dot" style="background:#d50000"></span>High Risk<br>
+    <span class="dot" style="background:#ff6d00"></span>Medium Risk<br>
+    <span class="dot" style="background:#ffd600"></span>Low Risk<br>
+    <span class="dot" style="background:#00e5ff"></span>Driver Path<br>
+    <span class="dot" style="background:#1e90ff"></span>🚗 Car Trail`;
+  return d;
+}};
+legend.addTo(map);
 
 // ── MOVING CAR SIMULATION ─────────────────────
 if (SHOW_CAR && PATHS.length > 0) {{
