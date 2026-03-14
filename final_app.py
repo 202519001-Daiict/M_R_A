@@ -463,29 +463,198 @@ ZONES.forEach(z=>{{
 }});
 
 
-// ── DRIVER PATHS ──────────────────────────────
-// coords are now road-snapped via OSRM — the polyline follows actual streets
+// ═══════════════════════════════════════════════════════════════════
+// ROAD-FOLLOWING CAR SIMULATION
+//
+// HOW IT WORKS:
+// 1. Raw GPS waypoints (from DB) are sent to OSRM routing API
+//    directly from the browser — browser CAN reach OSRM, Python server cannot.
+// 2. OSRM returns dense road geometry (~10-15m spacing) following actual streets.
+// 3. Car drives along those road points → follows lanes, turns, junctions.
+// 4. Path line drawn on map uses the same road geometry.
+// 5. Falls back to raw DB waypoints if OSRM is unavailable.
+// 6. localStorage resume keeps car position across Streamlit reruns.
+// ═══════════════════════════════════════════════════════════════════
+
 const pathLayer = L.layerGroup().addTo(map);
 const PATH_COLORS = ['#00e5ff','#69ff47','#ff4081','#e040fb','#ffab40'];
-PATHS.forEach((p,i) => {{
-  if (!p.coords || p.coords.length < 2) return;
-  const col = PATH_COLORS[i % PATH_COLORS.length];
-  // Solid road-following line (no dash — road geometry is already detailed)
-  L.polyline(p.coords, {{color:col, weight:4, opacity:0.65}})
-   .bindPopup(`<b>🛣️ Driver Path #${{p.id}}</b><br><small>${{p.coords.length}} road points</small>`)
-   .addTo(pathLayer);
-  // Start marker
-  L.circleMarker(p.coords[0], {{
-    radius:7, color:'#00c853', fillColor:'#00c853', fillOpacity:1, weight:2
-  }}).bindTooltip('🟢 Start').addTo(pathLayer);
-  // End marker
-  L.circleMarker(p.coords[p.coords.length-1], {{
-    radius:7, color:'#d50000', fillColor:'#d50000', fillOpacity:1, weight:2
-  }}).bindTooltip('🔴 Destination').addTo(pathLayer);
-}});
 
-// ── SEARCH: zoom to matched zones + open info panel ──────────────
-if(HAS_SEARCH){{
+// Show loading indicator while fetching road routes
+const loadingDiv = document.createElement('div');
+loadingDiv.id = 'routeLoader';
+loadingDiv.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  z-index:2000;background:rgba(13,17,23,0.92);color:#00e5ff;padding:14px 28px;
+  border-radius:10px;border:1px solid #00e5ff44;font-size:0.9rem;font-weight:600;
+  box-shadow:0 4px 20px #000a;pointer-events:none;`;
+loadingDiv.innerHTML = '🛣️ Loading road routes…';
+document.getElementById('map').appendChild(loadingDiv);
+
+// Fetch road geometry from OSRM for a list of [lat,lng] waypoints
+// Returns Promise<[[lat,lng], ...]> of dense road-following points
+async function fetchRoadRoute(waypoints) {{
+  if (!waypoints || waypoints.length < 2) return waypoints;
+
+  // OSRM expects "lng,lat" pairs separated by ";"
+  const coordStr = waypoints.map(([lat,lng]) => `${{lng}},${{lat}}`).join(';');
+  const url = `https://router.project-osrm.org/route/v1/driving/${{coordStr}}?overview=full&geometries=geojson`;
+
+  try {{
+    const resp = await fetch(url, {{signal: AbortSignal.timeout(8000)}});
+    if (!resp.ok) throw new Error('OSRM HTTP ' + resp.status);
+    const data = await resp.json();
+    if (data.code !== 'Ok') throw new Error('OSRM code: ' + data.code);
+
+    // GeoJSON coords are [lng,lat] — flip to [lat,lng]
+    return data.routes[0].geometry.coordinates.map(([lng,lat]) => [lat,lng]);
+  }} catch(e) {{
+    console.warn('OSRM routing failed, using raw waypoints:', e.message);
+    return waypoints;  // graceful fallback
+  }}
+}}
+
+// Process all paths: fetch road routes, then build car track + draw path lines
+async function initRoutesAndCar() {{
+  const roadPaths = [];   // resolved road-following coords per path
+
+  for (let pi = 0; pi < PATHS.length; pi++) {{
+    const p = PATHS[pi];
+    if (!p.coords || p.coords.length < 2) continue;
+
+    // Chunk waypoints: OSRM handles up to 100 but we use 25 for reliability
+    const chunkSize = 25;
+    let fullRoad = [];
+
+    for (let ci = 0; ci < p.coords.length - 1; ci += chunkSize - 1) {{
+      const chunk = p.coords.slice(ci, ci + chunkSize);
+      if (chunk.length < 2) break;
+      const road = await fetchRoadRoute(chunk);
+      // Avoid duplicating the last point of previous chunk
+      if (fullRoad.length > 0) fullRoad.push(...road.slice(1));
+      else fullRoad = road;
+    }}
+
+    if (fullRoad.length < 2) fullRoad = p.coords;  // safety fallback
+
+    roadPaths.push({{ id: p.id, coords: fullRoad }});
+
+    // Draw road-following path line on map
+    const col = PATH_COLORS[pi % PATH_COLORS.length];
+    L.polyline(fullRoad, {{color: col, weight: 5, opacity: 0.75}})
+     .bindPopup(`<b>🛣️ Driver Path #${{p.id}}</b><br><small>${{fullRoad.length}} road points</small>`)
+     .addTo(pathLayer);
+    // Start marker
+    L.circleMarker(fullRoad[0], {{
+      radius:8, color:'#00c853', fillColor:'#00c853', fillOpacity:1, weight:2
+    }}).bindTooltip('🟢 Start').addTo(pathLayer);
+    // End marker
+    L.circleMarker(fullRoad[fullRoad.length-1], {{
+      radius:8, color:'#d50000', fillColor:'#d50000', fillOpacity:1, weight:2
+    }}).bindTooltip('🔴 Destination').addTo(pathLayer);
+  }}
+
+  // Hide loading indicator
+  loadingDiv.remove();
+
+  // Start car simulation if enabled
+  if (SHOW_CAR && roadPaths.length > 0) {{
+    startCarSimulation(roadPaths);
+  }} else if (!SHOW_CAR) {{
+    localStorage.removeItem(LS_IDX);
+    localStorage.removeItem(LS_TRAIL);
+  }}
+}}
+
+function startCarSimulation(roadPaths) {{
+  const makeCarIcon = () => L.divIcon({{
+    className: 'car-icon',
+    html: `<span style="font-size:22px;line-height:1;display:block;
+                        filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
+    iconSize:[24,24], iconAnchor:[12,12], popupAnchor:[0,-14]
+  }});
+
+  // Flatten all road paths into single track
+  const allC = [];
+  roadPaths.forEach(p => {{ if (p.coords) allC.push(...p.coords); }});
+
+  // Resume from saved localStorage index
+  const savedIdx  = parseInt(localStorage.getItem(LS_IDX)||'0', 10);
+  const startIdx  = (savedIdx > 0 && savedIdx < allC.length) ? savedIdx : 0;
+
+  // Restore trail
+  let trailPts = [];
+  try {{ const s = JSON.parse(localStorage.getItem(LS_TRAIL)||'[]'); if(Array.isArray(s)) trailPts = s; }} catch(e) {{}}
+
+  const car   = L.marker(allC[startIdx], {{icon: makeCarIcon(), zIndexOffset: 1000}}).addTo(map);
+  const trail = L.polyline(trailPts, {{color:'#1e90ff', weight:3, opacity:0.7}}).addTo(map);
+  const zSt   = {{}};
+
+  function checkZones(lat, lng) {{
+    ZONES.forEach(z => {{
+      const dist = haversineM(lat, lng, z.lat, z.lng);
+      const prev = zSt[z.id] || null;
+      const rl   = (z.risk || 'RISK').toUpperCase();
+      if (dist <= ENTER_R) {{
+        if (prev !== 'entered') {{
+          zSt[z.id] = 'entered';
+          addAlert(`🚨 Entered ${{rl}} Zone: ${{z.area}}`,
+            `🚨 <b>ENTERED ${{rl}} RISK ZONE</b> — ${{z.area}} | ${{z.loc}} | Severity ${{z.si.toFixed(1)}}`, 'entered');
+        }}
+      }} else if (dist <= APPROACH_R) {{
+        if (prev === 'entered') {{
+          zSt[z.id] = 'approaching';
+          addAlert(`✅ Left ${{rl}} Zone — Safe: ${{z.area}}`,
+            `✅ <b>Left ${{rl}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`, 'left');
+        }} else if (prev === null) {{
+          zSt[z.id] = 'approaching';
+          addAlert(`⚠️ Approaching ${{rl}} Zone: ${{z.area}} (${{Math.round(dist)}}m)`,
+            `⚠️ <b>APPROACHING ${{rl}} RISK ZONE</b> — ${{z.area}} | ${{Math.round(dist)}}m ahead`, 'approaching');
+        }}
+      }} else {{
+        if (prev === 'entered') {{ zSt[z.id] = null; addAlert(`✅ Left ${{rl}} Zone — Safe: ${{z.area}}`, `✅ <b>Left ${{rl}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`, 'left'); }}
+        else if (prev === 'approaching') {{ zSt[z.id] = null; }}
+      }}
+    }});
+  }}
+
+  let idx = startIdx;
+  function step() {{
+    if (idx >= allC.length) {{
+      car.setIcon(L.divIcon({{className:'car-icon',
+        html:`<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
+        iconSize:[24,24], iconAnchor:[12,12]}}));
+      addAlert('🏁 Done!', '🏁 <b>Simulation complete — Destination reached!</b>', 'safe');
+      localStorage.removeItem(LS_IDX); localStorage.removeItem(LS_TRAIL);
+      return;
+    }}
+    const [lat, lng] = allC[idx];
+    car.setLatLng([lat, lng]);
+    trailPts.push([lat, lng]); trail.setLatLngs(trailPts);
+    if (idx % 10 === 0) {{
+      localStorage.setItem(LS_IDX, idx);
+      localStorage.setItem(LS_TRAIL, JSON.stringify(trailPts.slice(-200)));
+    }}
+    if (!map.getBounds().contains([lat, lng]))
+      map.panTo([lat, lng], {{animate:true, duration:0.4, easeLinearity:0.5}});
+    checkZones(lat, lng);
+    idx++;
+    setTimeout(step, 80);
+  }}
+
+  if (startIdx === 0) {{
+    map.setView(allC[0], 15);
+    addAlert('🟢 Started', `🟢 <b>Simulation started on real roads — ${{allC.length}} points</b>`, 'safe');
+    setTimeout(step, 600);
+  }} else {{
+    map.setView(allC[startIdx], 15);
+    addAlert('🟢 Resumed', `🟢 <b>Resumed from step ${{startIdx}} / ${{allC.length}}</b>`, 'safe');
+    setTimeout(step, 100);
+  }}
+}}
+
+// Kick everything off
+initRoutesAndCar();
+
+
   const mz=ZONES.filter(z=>SZ_IDS.has(z.id));
   if(mz.length>0){{
     const lats=mz.map(z=>z.lat),lngs=mz.map(z=>z.lng);
@@ -533,114 +702,6 @@ legend.onAdd = () => {{
 legend.addTo(map);
 
 
-// ── MOVING CAR SIMULATION ─────────────────────
-// localStorage resume: car saves its step index every 10 ticks.
-// On map rebuild (caused by search rerun), JS reads saved index
-// and resumes from there — car appears to never stop.
-if (SHOW_CAR && PATHS.length > 0) {{
-
-  const makeCarIcon = () => L.divIcon({{
-    className: 'car-icon',
-    html: `<span style="font-size:22px;line-height:1;display:block;
-                        filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>`,
-    iconSize:[24,24], iconAnchor:[12,12], popupAnchor:[0,-14]
-  }});
-
-  // Use road-snapped coords directly from OSRM — already dense (~10-20m spacing).
-  // Light interpolation only fills gaps > 30m (rare, e.g. tunnel/bridge sections
-  // where OSRM returns fewer points). This keeps the car on the road visually.
-  const allC=[]; PATHS.forEach(p=>{{if(p.coords)allC.push(...p.coords);}});
-  const ic=[];
-  function hav2(la1,ln1,la2,ln2){{
-    const R=6371000,dL=(la2-la1)*Math.PI/180,dl=(ln2-ln1)*Math.PI/180,
-          a=Math.sin(dL/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dl/2)**2;
-    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-  }}
-  for(let i=0;i<allC.length-1;i++){{
-    const[la1,ln1]=allC[i],[la2,ln2]=allC[i+1];
-    const seg=hav2(la1,ln1,la2,ln2);
-    // Only interpolate if gap > 30m (OSRM usually gives ~10-15m spacing)
-    const n = seg > 30 ? Math.round(seg/10) : 1;
-    for(let s=0;s<n;s++){{const t=s/n;ic.push([la1+(la2-la1)*t,ln1+(ln2-ln1)*t]);}}
-  }}
-  ic.push(allC[allC.length-1]);
-
-  // Resume from saved index — 0 if fresh start
-  const savedIdx = parseInt(localStorage.getItem(LS_IDX)||'0',10);
-  const startIdx = (savedIdx>0 && savedIdx<ic.length) ? savedIdx : 0;
-
-  // Restore trail from localStorage
-  let trailPts=[];
-  try{{const s=JSON.parse(localStorage.getItem(LS_TRAIL)||'[]');if(Array.isArray(s))trailPts=s;}}catch(e){{}}
-
-  const car = L.marker(ic[startIdx],{{icon:makeCarIcon(),zIndexOffset:1000}}).addTo(map);
-  const trail = L.polyline(trailPts,{{color:'#1e90ff',weight:3,opacity:0.7}}).addTo(map);
-  const zSt={{}};
-
-  function checkZones(lat,lng){{
-    ZONES.forEach(z=>{{
-      const dist=haversineM(lat,lng,z.lat,z.lng), prev=zSt[z.id]||null, rl=z.risk?z.risk.toUpperCase():'RISK';
-      if(dist<=ENTER_R){{
-        if(prev!=='entered'){{
-          zSt[z.id]='entered';
-          addAlert(`🚨 Entered ${{rl}} Zone: ${{z.area}}`,
-            `🚨 <b>ENTERED ${{rl}} RISK ZONE</b> — ${{z.area}} | ${{z.loc}} | Severity ${{z.si.toFixed(1)}}`,'entered');
-        }}
-      }}else if(dist<=APPROACH_R){{
-        if(prev==='entered'){{
-          zSt[z.id]='approaching';
-          addAlert(`✅ Left ${{rl}} Zone — Safe: ${{z.area}}`,
-            `✅ <b>Left ${{rl}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`,'left');
-        }}else if(prev===null){{
-          zSt[z.id]='approaching';
-          addAlert(`⚠️ Approaching ${{rl}} Zone: ${{z.area}} (${{Math.round(dist)}}m)`,
-            `⚠️ <b>APPROACHING ${{rl}} RISK ZONE</b> — ${{z.area}} | ${{Math.round(dist)}}m ahead`,'approaching');
-        }}
-      }}else{{
-        if(prev==='entered'){{zSt[z.id]=null;addAlert(`✅ Left ${{rl}} Zone — Safe: ${{z.area}}`,`✅ <b>Left ${{rl}} Risk Zone — Safe</b> &nbsp;›&nbsp; ${{z.area}}`,'left');}}
-        else if(prev==='approaching'){{zSt[z.id]=null;}}
-      }}
-    }});
-  }}
-
-  let idx=startIdx;
-  function step(){{
-    if(idx>=ic.length){{
-      car.setIcon(L.divIcon({{className:'car-icon',
-        html:`<span style="font-size:22px;line-height:1;display:block;">🏁</span>`,
-        iconSize:[24,24],iconAnchor:[12,12]}}));
-      addAlert('🏁 Done!','🏁 <b>Simulation complete — Destination reached!</b>','safe');
-      localStorage.removeItem(LS_IDX); localStorage.removeItem(LS_TRAIL);
-      return;
-    }}
-    const[lat,lng]=ic[idx];
-    car.setLatLng([lat,lng]);
-    trailPts.push([lat,lng]); trail.setLatLngs(trailPts);
-    if(idx%10===0){{
-      localStorage.setItem(LS_IDX,idx);
-      localStorage.setItem(LS_TRAIL,JSON.stringify(trailPts.slice(-200)));
-    }}
-    if(!map.getBounds().contains([lat,lng]))
-      map.panTo([lat,lng],{{animate:true,duration:0.4,easeLinearity:0.5}});
-    checkZones(lat,lng);
-    idx++;
-    setTimeout(step,80);
-  }}
-
-  if(startIdx===0){{
-    map.setView(ic[0],14);
-    addAlert('🟢 Started',`🟢 <b>Simulation started — ${{ic.length}} steps</b>`,'safe');
-    setTimeout(step,500);
-  }}else{{
-    map.setView(ic[startIdx],14);
-    addAlert('🟢 Resumed',`🟢 <b>Resumed from step ${{startIdx}} / ${{ic.length}}</b>`,'safe');
-    setTimeout(step,100);
-  }}
-
-}}else if(!SHOW_CAR){{
-  localStorage.removeItem(LS_IDX);
-  localStorage.removeItem(LS_TRAIL);
-}}
 </script>
 </body>
 </html>"""
