@@ -522,26 +522,51 @@ legend.addTo(map);
 // ═══════════════════════════════════════════════════════════════
 
 // Fetch real road geometry from OSRM for a list of [lat,lng] waypoints
+// Snap GPS trace to road centerline using OSRM /match endpoint.
+// /match is designed for GPS traces — snaps each point to the nearest road.
+// Falls back to /route (start→end), then raw waypoints on any failure.
 function fetchRoadRoute(waypoints) {{
   return new Promise(function(resolve) {{
     if (!waypoints || waypoints.length < 2) {{ resolve(waypoints); return; }}
     var coordStr = waypoints.map(function(c){{ return c[1]+','+c[0]; }}).join(';');
-    var url = 'https://router.project-osrm.org/route/v1/driving/' + coordStr + '?overview=full&geometries=geojson';
+    var matchUrl = 'https://router.project-osrm.org/match/v1/driving/' + coordStr +
+                   '?overview=full&geometries=geojson&tidy=true';
+
+    function tryRoute() {{
+      var ends = waypoints[0][1]+','+waypoints[0][0]+';'+
+                 waypoints[waypoints.length-1][1]+','+waypoints[waypoints.length-1][0];
+      var xhr2 = new XMLHttpRequest();
+      xhr2.timeout = 7000;
+      xhr2.open('GET','https://router.project-osrm.org/route/v1/driving/'+ends+'?overview=full&geometries=geojson',true);
+      xhr2.onload = function() {{
+        try {{
+          var d=JSON.parse(xhr2.responseText);
+          if(d.code==='Ok') resolve(d.routes[0].geometry.coordinates.map(function(c){{return[c[1],c[0]];}}));
+          else resolve(waypoints);
+        }} catch(e) {{ resolve(waypoints); }}
+      }};
+      xhr2.onerror=function(){{resolve(waypoints);}};
+      xhr2.ontimeout=function(){{resolve(waypoints);}};
+      xhr2.send();
+    }}
+
     var xhr = new XMLHttpRequest();
     xhr.timeout = 7000;
-    xhr.open('GET', url, true);
+    xhr.open('GET', matchUrl, true);
     xhr.onload = function() {{
       try {{
-        var data = JSON.parse(xhr.responseText);
-        if (data.code === 'Ok') {{
-          // GeoJSON returns [lng,lat] — flip to [lat,lng]
-          var pts = data.routes[0].geometry.coordinates.map(function(c){{ return [c[1],c[0]]; }});
+        var data=JSON.parse(xhr.responseText);
+        if(data.code==='Ok' && data.matchings && data.matchings.length>0) {{
+          var pts=[];
+          data.matchings.forEach(function(m){{
+            m.geometry.coordinates.forEach(function(c){{pts.push([c[1],c[0]]);}});
+          }});
           resolve(pts);
-        }} else {{ resolve(waypoints); }}
-      }} catch(e) {{ resolve(waypoints); }}
+        }} else {{ tryRoute(); }}
+      }} catch(e) {{ tryRoute(); }}
     }};
-    xhr.onerror = function() {{ resolve(waypoints); }};
-    xhr.ontimeout = function() {{ resolve(waypoints); }};
+    xhr.onerror=function(){{tryRoute();}};
+    xhr.ontimeout=function(){{tryRoute();}};
     xhr.send();
   }});
 }}
