@@ -442,35 +442,70 @@ const BL = {{
 BL[localStorage.getItem('riskmap_bl')||'dark'].addTo(map);
 
 // ── NAVIGATION MARKERS ────────────────────────
-// Show start pin (green) and destination pin (red) when user sets a route
+// ── NAVIGATION MARKERS (Google Maps style) ────
 if (NAV_ACTIVE) {{
-  // Origin marker
+
+  // ── START: Blue "My Location" dot (pulsing circle like Google Maps) ──
   L.marker(NAV_ORIGIN, {{icon: L.divIcon({{
     className:'',
-    html:`<div style="display:flex;flex-direction:column;align-items:center">
-      <div style="background:#00c853;width:18px;height:18px;border-radius:50%;
-           border:3px solid #fff;box-shadow:0 0 12px #00c853;"></div>
-      <div style="background:#00c853;width:2px;height:12px;"></div>
-    </div>`,
-    iconSize:[18,30], iconAnchor:[9,30]
+    html:`<div style="position:relative;width:22px;height:22px">
+      <!-- Outer pulse ring -->
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+           width:22px;height:22px;border-radius:50%;
+           background:rgba(66,133,244,0.2);
+           animation:locPulse 2s ease-out infinite;"></div>
+      <!-- Mid ring -->
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+           width:14px;height:14px;border-radius:50%;
+           background:rgba(66,133,244,0.35);"></div>
+      <!-- Core blue dot -->
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+           width:14px;height:14px;border-radius:50%;
+           background:#4285f4;border:2.5px solid #fff;
+           box-shadow:0 1px 6px rgba(66,133,244,0.8);"></div>
+    </div>
+    <style>
+      @keyframes locPulse{{
+        0%{{transform:translate(-50%,-50%) scale(0.8);opacity:0.8;}}
+        70%{{transform:translate(-50%,-50%) scale(2.2);opacity:0;}}
+        100%{{transform:translate(-50%,-50%) scale(0.8);opacity:0;}}
+      }}
+    </style>`,
+    iconSize:[22,22], iconAnchor:[11,11], popupAnchor:[0,-14]
   }})}})
-  .bindPopup(`<b style="color:#00c853">🟢 Start</b><br>${{NAV_ONAME}}`)
+  .bindPopup(`<div style="font-size:0.82rem">
+    <b style="color:#4285f4">📍 Start</b><br>
+    <span style="color:#555">${{NAV_ONAME}}</span>
+  </div>`)
   .addTo(map).openPopup();
 
-  // Destination marker
+  // ── DESTINATION: Red Google Maps–style teardrop pin ──
   L.marker(NAV_DEST, {{icon: L.divIcon({{
     className:'',
-    html:`<div style="display:flex;flex-direction:column;align-items:center">
-      <div style="background:#d50000;width:18px;height:18px;border-radius:50%;
-           border:3px solid #fff;box-shadow:0 0 12px #d50000;"></div>
-      <div style="background:#d50000;width:2px;height:12px;"></div>
+    html:`<div style="position:relative;width:28px;height:40px;
+               filter:drop-shadow(0 2px 6px rgba(0,0,0,0.4))">
+      <svg viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg"
+           style="width:28px;height:40px;display:block">
+        <!-- Pin shadow ellipse -->
+        <ellipse cx="14" cy="38.5" rx="5" ry="2" fill="rgba(0,0,0,0.2)"/>
+        <!-- Pin body -->
+        <path d="M14 1 C7.4 1 2 6.4 2 13 C2 22 14 37 14 37 C14 37 26 22 26 13 C26 6.4 20.6 1 14 1Z"
+              fill="#ea4335" stroke="#c62828" stroke-width="0.8"/>
+        <!-- White inner circle -->
+        <circle cx="14" cy="13" r="7" fill="white"/>
+        <!-- Red center dot -->
+        <circle cx="14" cy="13" r="3.5" fill="#ea4335"/>
+      </svg>
     </div>`,
-    iconSize:[18,30], iconAnchor:[9,30]
+    iconSize:[28,40], iconAnchor:[14,40], popupAnchor:[0,-42]
   }})}})
-  .bindPopup(`<b style="color:#d50000">🔴 Destination</b><br>${{NAV_DNAME}}`)
+  .bindPopup(`<div style="font-size:0.82rem">
+    <b style="color:#ea4335">🏁 Destination</b><br>
+    <span style="color:#555">${{NAV_DNAME}}</span>
+  </div>`)
   .addTo(map);
 
-  // Fit map to show both pins with padding
+  // Fit map to show both markers
   map.fitBounds([NAV_ORIGIN, NAV_DEST], {{padding:[60,60], maxZoom:15, animate:true}});
 }}
 
