@@ -708,60 +708,249 @@ def main():
         if k not in st.session_state: st.session_state[k]=v
 
     with st.sidebar:
-        st.image("https://img.icons8.com/color/96/traffic-jam.png", width=56)
-        st.title("Road Risk Navigator")
-        st.caption("Powered by Supabase + Leaflet")
-        st.divider()
+        # ── CUSTOM SIDEBAR CSS ─────────────────────
+        st.markdown("""
+<style>
+/* Sidebar background */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0a0e1a 0%, #0d1117 100%);
+    border-right: 1px solid #1a2035;
+}
+section[data-testid="stSidebar"] .block-container { padding: 0 !important; }
 
-        st.subheader("🎮 Session Controls")
-        c1,c2 = st.columns(2)
-        with c1: start_btn = st.button("▶ Start", use_container_width=True, type="primary")
-        with c2: stop_btn  = st.button("⏹ Stop",  use_container_width=True)
-        if st.session_state.running:
-            st.success("🟢 Car simulation active.")
-        else:
-            st.info("⏸ Press Start to begin.")
-        st.divider()
+/* Hide default streamlit padding */
+section[data-testid="stSidebar"] > div { padding: 0 !important; }
 
-        # ── ROUTE NAVIGATION ──────────────────────
-        st.subheader("🧭 Route Navigation")
+/* Input styling */
+section[data-testid="stSidebar"] .stTextInput input {
+    background: #141929 !important;
+    border: 1px solid #1e2a3e !important;
+    border-radius: 8px !important;
+    color: #e2e8f0 !important;
+    font-size: 0.85rem !important;
+}
+section[data-testid="stSidebar"] .stTextInput input:focus {
+    border-color: #4285f4 !important;
+    box-shadow: 0 0 0 2px rgba(66,133,244,0.2) !important;
+}
+section[data-testid="stSidebar"] .stTextInput label { color: #8899aa !important; font-size:0.72rem !important; }
 
-        origin_input = st.text_input("📍 Start Location",
+/* Button styling */
+section[data-testid="stSidebar"] .stButton > button {
+    border-radius: 20px !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    border: none !important;
+    transition: all 0.2s !important;
+}
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: linear-gradient(135deg,#4285f4,#1a73e8) !important;
+    color: #fff !important;
+}
+section[data-testid="stSidebar"] .stButton > button:not([kind="primary"]) {
+    background: #1e2535 !important;
+    color: #aab !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px #0006 !important;
+}
+
+/* Multiselect */
+section[data-testid="stSidebar"] .stMultiSelect [data-baseweb="select"] {
+    background:#141929 !important; border-color:#1e2a3e !important;
+}
+section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font-size:0.82rem !important; }
+</style>
+""", unsafe_allow_html=True)
+
+        # ── APP HEADER ────────────────────────────
+        st.markdown("""
+<div style="background:linear-gradient(135deg,#1a73e8,#0d47a1);padding:20px 20px 16px;margin-bottom:0">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+    <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:8px;font-size:1.4rem">🚦</div>
+    <div>
+      <div style="color:#fff;font-size:1.05rem;font-weight:700;line-height:1.2">Road Risk Navigator</div>
+      <div style="color:rgba(255,255,255,0.65);font-size:0.7rem">Live accident zone detection</div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        # ── ROUTE NAVIGATION (top — like Google Maps) ──
+        st.markdown("""
+<div style="padding:14px 16px 4px;font-size:0.7rem;font-weight:700;
+            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
+  🧭 Route Navigation
+</div>
+""", unsafe_allow_html=True)
+
+        # Route input card
+        st.markdown("""
+<div style="margin:0 10px 8px;background:#141929;border:1px solid #1e2a3e;
+            border-radius:12px;overflow:hidden">
+  <div style="display:flex;align-items:center;padding:2px 10px 0;gap:8px">
+    <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;padding:6px 0">
+      <div style="width:11px;height:11px;border-radius:50%;background:#00c853;
+                  border:2px solid #fff;box-shadow:0 0 8px #00c85388"></div>
+      <div style="width:1.5px;height:20px;background:linear-gradient(#00c853,#d50000);margin:2px 0"></div>
+      <div style="width:11px;height:11px;border-radius:50%;background:#d50000;
+                  border:2px solid #fff;box-shadow:0 0 8px #d5000088"></div>
+    </div>
+    <div style="flex:1;min-width:0"></div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        origin_input = st.text_input("Start", key="nav_origin_input",
             value=st.session_state.nav_origin,
-            placeholder="e.g. Jogeshwari, Mumbai")
-        dest_input = st.text_input("🏁 Destination",
+            placeholder="Choose starting point…")
+        dest_input = st.text_input("Destination", key="nav_dest_input",
             value=st.session_state.nav_dest,
-            placeholder="e.g. Vikhroli, Mumbai")
+            placeholder="Choose destination…")
 
-        nc1, nc2 = st.columns(2)
-        with nc1: nav_btn   = st.button("🗺️ Set Route",   use_container_width=True, type="primary")
-        with nc2: nav_clear = st.button("✖ Clear Route", use_container_width=True)
+        nc1, nc2 = st.columns([3,2])
+        with nc1: nav_btn   = st.button("🗺️ Get Directions", use_container_width=True, type="primary")
+        with nc2: nav_clear = st.button("✕ Clear", use_container_width=True)
 
-        if st.session_state.nav_active and st.session_state.nav_origin and st.session_state.nav_dest:
+        # Active route card
+        if st.session_state.nav_active:
             st.markdown(f"""
-<div style="background:#0d1f0d;border:1px solid #00c85344;border-radius:8px;padding:8px 12px;font-size:0.78rem">
-  <div style="color:#00c853;margin-bottom:4px">🟢 <b>From:</b> {st.session_state.nav_origin}</div>
-  <div style="color:#d50000">🔴 <b>To:</b> {st.session_state.nav_dest}</div>
-</div>""", unsafe_allow_html=True)
+<div style="margin:6px 0 2px;background:#0a1628;border:1px solid #1a3a6e;
+            border-radius:10px;padding:10px 14px;font-size:0.78rem">
+  <div style="color:#4285f4;font-weight:700;font-size:0.7rem;margin-bottom:6px;
+              letter-spacing:.5px">ACTIVE ROUTE</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+    <div style="width:8px;height:8px;border-radius:50%;background:#00c853;flex-shrink:0"></div>
+    <div style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+      {st.session_state.nav_origin}</div>
+  </div>
+  <div style="margin-left:3px;width:1px;height:10px;background:#1e3a5e;margin-bottom:5px;margin-left:11px"></div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div style="width:8px;height:8px;border-radius:50%;background:#d50000;flex-shrink:0"></div>
+    <div style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+      {st.session_state.nav_dest}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
         if st.session_state.nav_error:
-            st.error(st.session_state.nav_error)
-        st.divider()
+            st.markdown(f"""
+<div style="margin:6px 0;background:#2a0a0a;border:1px solid #d5000044;border-radius:8px;
+            padding:8px 12px;font-size:0.75rem;color:#ff6b6b">
+  ⚠️ {st.session_state.nav_error}
+</div>""", unsafe_allow_html=True)
 
-        st.subheader("📍 Location Search")
-        address_input = st.text_input("Search location",
-            placeholder="e.g. Deonar | Andheri, Mumbai | 19.076, 72.877")
-        search_btn = st.button("🔍 Find & Check Risk", use_container_width=True)
+        # ── DIVIDER ───────────────────────────────
+        st.markdown('<div style="height:1px;background:#1a2035;margin:12px 0"></div>', unsafe_allow_html=True)
+
+        # ── SIMULATION CONTROLS ───────────────────
+        st.markdown("""
+<div style="padding:4px 16px 8px;font-size:0.7rem;font-weight:700;
+            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
+  🚗 Simulation
+</div>
+""", unsafe_allow_html=True)
+
+        c1, c2 = st.columns(2)
+        with c1: start_btn = st.button("▶ Start", use_container_width=True, type="primary")
+        with c2: stop_btn  = st.button("⏹ Stop",  use_container_width=True)
+
+        if st.session_state.running:
+            st.markdown("""
+<div style="margin:6px 0 2px;background:#0a1f0a;border:1px solid #00c85344;border-radius:8px;
+            padding:8px 12px;display:flex;align-items:center;gap:8px;font-size:0.78rem">
+  <div style="width:8px;height:8px;border-radius:50%;background:#00c853;
+              animation:blink 1s ease-in-out infinite;flex-shrink:0"></div>
+  <span style="color:#00c853;font-weight:600">Simulation active</span>
+</div>
+<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}</style>
+""", unsafe_allow_html=True)
+        else:
+            st.markdown("""
+<div style="margin:6px 0 2px;background:#111827;border:1px solid #1e2535;border-radius:8px;
+            padding:8px 12px;font-size:0.78rem;color:#556;text-align:center">
+  Press <b style="color:#aab">Start</b> to begin simulation
+</div>""", unsafe_allow_html=True)
+
+        # ── DIVIDER ───────────────────────────────
+        st.markdown('<div style="height:1px;background:#1a2035;margin:12px 0"></div>', unsafe_allow_html=True)
+
+        # ── ZONE SEARCH ───────────────────────────
+        st.markdown("""
+<div style="padding:4px 16px 8px;font-size:0.7rem;font-weight:700;
+            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
+  🔍 Zone Search
+</div>
+""", unsafe_allow_html=True)
+
+        address_input = st.text_input("Search accident zones",
+            placeholder="e.g. Deonar | Andheri | 19.076, 72.877")
+        search_btn = st.button("Search & Check Risk", use_container_width=True, type="primary")
         if st.session_state.highlight_point:
-            if st.button("✖ Clear Search", use_container_width=True):
+            if st.button("✕ Clear Search", use_container_width=True):
                 for k in ["highlight_point","search_zones","risk_info","highlight_label","search_query","search_error"]:
                     st.session_state[k] = None if k in ["highlight_point","search_zones","risk_info"] else ""
-        st.divider()
 
-        st.subheader("🔧 Filters & Settings")
-        risk_filter = st.multiselect("Risk Level", ["High","Medium","Low"], default=["High","Medium","Low"])
-        show_paths  = st.checkbox("Show Driver Paths", value=True)
-        show_zones  = st.checkbox("Show Accident Zones", value=True)
+        # ── DIVIDER ───────────────────────────────
+        st.markdown('<div style="height:1px;background:#1a2035;margin:12px 0"></div>', unsafe_allow_html=True)
+
+        # ── MAP LAYERS ────────────────────────────
+        st.markdown("""
+<div style="padding:4px 16px 8px;font-size:0.7rem;font-weight:700;
+            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
+  🗺️ Map Layers
+</div>
+""", unsafe_allow_html=True)
+
+        risk_filter = st.multiselect("Risk Levels", ["High","Medium","Low"],
+                                     default=["High","Medium","Low"], label_visibility="collapsed")
+        show_paths = st.checkbox("🛣️ Driver Paths",   value=True)
+        show_zones = st.checkbox("🚨 Accident Zones", value=True)
+
+        # ── DIVIDER ───────────────────────────────
+        st.markdown('<div style="height:1px;background:#1a2035;margin:12px 0"></div>', unsafe_allow_html=True)
+
+        # ── LIVE STATS ────────────────────────────
+        st.markdown("""
+<div style="padding:4px 16px 8px;font-size:0.7rem;font-weight:700;
+            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
+  📊 Live Stats
+</div>
+""", unsafe_allow_html=True)
+
+        _df_tmp = load_accident_data()
+        _high   = int((_df_tmp["risk_level"]=="High").sum())
+        _med    = int((_df_tmp["risk_level"]=="Medium").sum())
+        _low    = int((_df_tmp["risk_level"]=="Low").sum())
+        _total  = len(_df_tmp)
+        st.markdown(f"""
+<div style="margin:0 0 10px;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:0.76rem">
+  <div style="background:#1a0a0a;border:1px solid #d5000033;border-radius:8px;padding:8px 10px;text-align:center">
+    <div style="color:#d50000;font-size:1.1rem;font-weight:800">{_high}</div>
+    <div style="color:#778;font-size:0.67rem">High Risk</div>
+  </div>
+  <div style="background:#1a100a;border:1px solid #ff6d0033;border-radius:8px;padding:8px 10px;text-align:center">
+    <div style="color:#ff6d00;font-size:1.1rem;font-weight:800">{_med}</div>
+    <div style="color:#778;font-size:0.67rem">Medium Risk</div>
+  </div>
+  <div style="background:#1a1a0a;border:1px solid #ffd60033;border-radius:8px;padding:8px 10px;text-align:center">
+    <div style="color:#ffd600;font-size:1.1rem;font-weight:800">{_low}</div>
+    <div style="color:#778;font-size:0.67rem">Low Risk</div>
+  </div>
+  <div style="background:#0a0f1a;border:1px solid #4285f433;border-radius:8px;padding:8px 10px;text-align:center">
+    <div style="color:#4285f4;font-size:1.1rem;font-weight:800">{_total}</div>
+    <div style="color:#778;font-size:0.67rem">Total Zones</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        # ── FOOTER ────────────────────────────────
+        st.markdown("""
+<div style="padding:10px 16px;text-align:center;font-size:0.67rem;color:#334">
+  Powered by Supabase · Leaflet · OSM
+</div>
+""", unsafe_allow_html=True)
 
     # Start/Stop — only these change show_car
     if start_btn:
