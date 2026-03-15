@@ -1,5 +1,5 @@
 """
-Road Accident Risk Navigation Dashboard
+Road Risk Intelligence Navigator
 Uses Supabase PostgreSQL + Leaflet.js (moving car + smart zone alerts)
 """
 
@@ -17,7 +17,7 @@ from geopy.distance import geodesic
 # 1. PAGE CONFIGURATION
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Road Risk Navigator",
+    page_title="Road Risk Intelligence Navigator",
     page_icon="🚦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1004,8 +1004,8 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
   <div style="display:flex;align-items:center;gap:12px">
     <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:8px;font-size:1.4rem">🚦</div>
     <div>
-      <div style="color:#fff;font-size:1.05rem;font-weight:700;line-height:1.2">Road Risk Navigator</div>
-      <div style="color:rgba(255,255,255,0.65);font-size:0.7rem">Live accident zone detection</div>
+      <div style="color:#fff;font-size:1.05rem;font-weight:700;line-height:1.2">Road Risk Intelligence Navigator</div>
+      <div style="color:rgba(255,255,255,0.65);font-size:0.7rem">Accident zone risk analysis · Mumbai</div>
     </div>
   </div>
 </div>
@@ -1013,10 +1013,11 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 
         # ── ROUTE NAVIGATION SECTION ──────────────
         st.markdown("""
-<div style="padding:10px 16px 4px">
-  <span style="font-size:0.7rem;font-weight:700;letter-spacing:1px;color:#4285f4;text-transform:uppercase">
-    🧭 Route Navigation
-  </span>
+<div style="padding:14px 16px 6px">
+  <div style="font-size:0.82rem;font-weight:800;letter-spacing:0.5px;color:#4285f4;
+              display:flex;align-items:center;gap:6px">
+    <span style="font-size:1rem">🧭</span> ROUTE NAVIGATION
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1106,9 +1107,12 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 
         # ── SIMULATION CONTROLS ───────────────────
         st.markdown("""
-<div style="padding:4px 16px 8px;font-size:0.7rem;font-weight:700;
-            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
-  🚗 Simulation
+<div style="padding:4px 16px 8px">
+  <div style="font-size:0.82rem;font-weight:800;letter-spacing:0.5px;color:#4285f4;
+              display:flex;align-items:center;gap:6px">
+    <span style="font-size:1rem">🚗</span> ROUTE SIMULATION
+  </div>
+  <div style="font-size:0.68rem;color:#556;margin-top:2px">Replay car through historical accident data</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1122,7 +1126,7 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
             padding:8px 12px;display:flex;align-items:center;gap:8px;font-size:0.78rem">
   <div style="width:8px;height:8px;border-radius:50%;background:#00c853;
               animation:blink 1s ease-in-out infinite;flex-shrink:0"></div>
-  <span style="color:#00c853;font-weight:600">Simulation active</span>
+  <span style="color:#00c853;font-weight:600">Simulation running</span>
 </div>
 <style>@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}</style>
 """, unsafe_allow_html=True)
@@ -1138,9 +1142,12 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 
         # ── ZONE SEARCH ───────────────────────────
         st.markdown("""
-<div style="padding:4px 16px 8px;font-size:0.7rem;font-weight:700;
-            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
-  🔍 Zone Search
+<div style="padding:4px 16px 8px">
+  <div style="font-size:0.82rem;font-weight:800;letter-spacing:0.5px;color:#4285f4;
+              display:flex;align-items:center;gap:6px">
+    <span style="font-size:1rem">🔍</span> SEARCH ACCIDENT ZONES
+  </div>
+  <div style="font-size:0.68rem;color:#556;margin-top:2px">Find zones by area name or coordinates</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1157,9 +1164,12 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 
         # ── MAP LAYERS ────────────────────────────
         st.markdown("""
-<div style="padding:4px 16px 8px;font-size:0.7rem;font-weight:700;
-            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
-  🗺️ Map Layers
+<div style="padding:4px 16px 8px">
+  <div style="font-size:0.82rem;font-weight:800;letter-spacing:0.5px;color:#4285f4;
+              display:flex;align-items:center;gap:6px">
+    <span style="font-size:1rem">🗺️</span> MAP LAYERS
+  </div>
+  <div style="font-size:0.68rem;color:#556;margin-top:2px">Filter zones by risk level</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1235,8 +1245,12 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 
         st.markdown(f"""
 <div style="padding:4px 16px 6px;display:flex;align-items:center;justify-content:space-between">
-  <div style="font-size:0.7rem;font-weight:700;letter-spacing:1px;color:#4285f4;text-transform:uppercase">
-    📊 Zone Stats
+  <div>
+    <div style="font-size:0.82rem;font-weight:800;letter-spacing:0.5px;color:#4285f4;
+                display:flex;align-items:center;gap:6px">
+      <span style="font-size:1rem">📊</span> ACCIDENT ZONE STATS
+    </div>
+    <div style="font-size:0.68rem;color:#556;margin-top:2px">Based on recorded historical data</div>
   </div>
   {_route_tag}
 </div>
@@ -1274,7 +1288,7 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
         # ── FOOTER ────────────────────────────────
         st.markdown("""
 <div style="padding:10px 16px;text-align:center;font-size:0.67rem;color:#334">
-  Powered by Supabase · Leaflet · OSM
+  Powered by Supabase · Leaflet · OSM · Historical Data
 </div>
 """, unsafe_allow_html=True)
 
@@ -1355,7 +1369,7 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
     display_df    = filtered_df if show_zones else accident_df.iloc[0:0]
     display_paths = driver_paths if show_paths else []
 
-    st.title("🚦 Road Accident Risk Dashboard")
+    st.title("🚦 Road Risk Intelligence Navigator")
     k1,k2,k3,k4,k5 = st.columns(5)
     k1.metric("Total Hotspots",  len(accident_df))
     k2.metric("High Risk Zones", int((accident_df["risk_level"]=="High").sum()))
@@ -1385,11 +1399,11 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
         } for z in matched_zones]).sort_values("Severity Index", ascending=False)
         st.dataframe(near_df, use_container_width=True, hide_index=True)
 
-    st.subheader("🗺️ Interactive Risk Map  •  🚗 Live Car Simulation")
+    st.subheader("🗺️ Accident Risk Map  •  🚗 Route Simulation")
     if st.session_state.nav_active:
         st.caption(f"🟢 **{st.session_state.nav_origin}** → 🔴 **{st.session_state.nav_dest}**")
     else:
-        st.caption("Car moves along the driver path. Alert bar at bottom shows real-time zone alerts.")
+        st.caption("Car simulates a route through historical accident zones. Alert bar shows zone warnings based on recorded data.")
 
     # Center on route midpoint if nav is active
     if st.session_state.nav_active and st.session_state.nav_origin_coord and st.session_state.nav_dest_coord:
@@ -1425,7 +1439,7 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 
     st.markdown("""
 <div class="footer-bar">
-    🚦 <strong>Road Risk Navigator</strong> &nbsp;|&nbsp;
+    🚦 <strong>Road Risk Intelligence Navigator</strong> &nbsp;|&nbsp;
     Data: Supabase PostgreSQL &nbsp;|&nbsp;
     Map: Leaflet.js &nbsp;|&nbsp;
     Geocoding: Nominatim (OpenStreetMap) &nbsp;|&nbsp;
