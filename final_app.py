@@ -307,24 +307,25 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 
   /* ── Google Maps–style layers button ── */
   #layerBtn{{
-    position:absolute;bottom:90px;right:12px;z-index:1003;
-    width:44px;height:44px;border-radius:50%;
+    position:absolute;top:12px;right:12px;z-index:1003;
+    width:44px;height:44px;border-radius:10px;
     background:#fff;border:none;cursor:pointer;
-    box-shadow:0 2px 10px rgba(0,0,0,0.35);
+    box-shadow:0 2px 10px rgba(0,0,0,0.3);
     display:flex;align-items:center;justify-content:center;
     font-size:20px;transition:box-shadow 0.2s,transform 0.15s;
   }}
-  #layerBtn:hover{{box-shadow:0 4px 16px rgba(0,0,0,0.45);transform:scale(1.05);}}
-  #layerBtn.active{{background:#e8f0fe;box-shadow:0 4px 16px rgba(66,133,244,0.45);}}
+  #layerBtn:hover{{box-shadow:0 4px 16px rgba(0,0,0,0.4);transform:scale(1.05);}}
+  #layerBtn.active{{background:#e8f0fe;box-shadow:0 4px 16px rgba(66,133,244,0.4);}}
 
   /* ── Layer picker panel ── */
   #layerPanel{{
-    position:absolute;bottom:144px;right:12px;z-index:1003;
+    position:absolute;top:64px;right:12px;z-index:1003;
     background:#fff;border-radius:14px;
-    box-shadow:0 4px 20px rgba(0,0,0,0.28);
+    box-shadow:0 4px 20px rgba(0,0,0,0.25);
     width:200px;padding:12px 0 8px;
-    display:none;animation:fadeUp 0.2s ease;
+    display:none;animation:fadeDown 0.2s ease;
   }}
+  @keyframes fadeDown{{from{{opacity:0;transform:translateY(-8px);}}to{{opacity:1;transform:translateY(0);}}}}
   #layerPanel.open{{display:block;}}
   #layerPanel .lp-title{{
     font-size:0.68rem;font-weight:700;letter-spacing:.8px;
@@ -650,7 +651,7 @@ function toggleOverlay(which) {{
 setBase(_currentBase);
 
 // ── LEGEND ────────────────────────────────────
-const legend=L.control({{position:'bottomright'}});
+const legend=L.control({{position:'bottomleft'}});
 legend.onAdd=()=>{{
   const d=L.DomUtil.create('div','legend');
   d.innerHTML=`<h4>🗺 Legend</h4>
