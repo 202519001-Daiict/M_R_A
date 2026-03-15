@@ -922,16 +922,40 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
         _route_active = st.session_state.nav_active and _nav_o and _nav_d
 
         if _route_active:
-            # Bounding box between origin and destination + 1km buffer (~0.01 deg)
-            _buf  = 0.02
-            _lat_min = min(_nav_o[0], _nav_d[0]) - _buf
-            _lat_max = max(_nav_o[0], _nav_d[0]) + _buf
-            _lng_min = min(_nav_o[1], _nav_d[1]) - _buf
-            _lng_max = max(_nav_o[1], _nav_d[1]) + _buf
-            _stats_df = _df_tmp[
-                (_df_tmp["latitude"]  >= _lat_min) & (_df_tmp["latitude"]  <= _lat_max) &
-                (_df_tmp["longitude"] >= _lng_min) & (_df_tmp["longitude"] <= _lng_max)
-            ]
+            import math
+
+            def _dist_point_to_segment(plat, plng, alat, alng, blat, blng):
+                """Perpendicular distance in metres from point P to line segment A→B."""
+                # Convert to approximate metres using equirectangular
+                R = 6371000
+                clat = math.radians((alat + blat) / 2)
+                ax = math.radians(alng) * R * math.cos(clat)
+                ay = math.radians(alat) * R
+                bx = math.radians(blng) * R * math.cos(clat)
+                by = math.radians(blat) * R
+                px = math.radians(plng) * R * math.cos(clat)
+                py = math.radians(plat) * R
+                # Vector AB
+                abx, aby = bx - ax, by - ay
+                ab2 = abx*abx + aby*aby
+                if ab2 == 0:
+                    return math.hypot(px-ax, py-ay)
+                # Project P onto AB, clamp to [0,1]
+                t = max(0, min(1, ((px-ax)*abx + (py-ay)*aby) / ab2))
+                # Nearest point on segment
+                nx, ny = ax + t*abx, ay + t*aby
+                return math.hypot(px-nx, py-ny)
+
+            # Keep zones within 600m of the route line (matches APPROACH_R + buffer)
+            _CORRIDOR = 600
+            _mask = _df_tmp.apply(
+                lambda r: _dist_point_to_segment(
+                    r["latitude"], r["longitude"],
+                    _nav_o[0], _nav_o[1],
+                    _nav_d[0], _nav_d[1]
+                ) <= _CORRIDOR, axis=1
+            )
+            _stats_df = _df_tmp[_mask]
             _stats_label = "ON YOUR ROUTE"
             _label_color = "#4285f4"
         else:
