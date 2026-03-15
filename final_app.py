@@ -497,8 +497,8 @@ if (SHOW_CAR && PATHS.length > 0) {{
   var zSt   = {{}};
 
   function checkZones(lat, lng) {{
-    // ── PASS 1: update every zone's state silently ──
-    var alerts = [];   // collect alerts to fire after all states are known
+    // PASS 1: update all zone states, collect transition events
+    var alerts = [];
 
     ZONES.forEach(function(z) {{
       var dist = haversineM(lat,lng,z.lat,z.lng);
@@ -519,22 +519,21 @@ if (SHOW_CAR && PATHS.length > 0) {{
           alerts.push({{type:'approaching', rl:rl, z:z, dist:dist}});
         }}
       }} else {{
-        if (prev==='entered' || prev==='approaching') {{
+        if (prev==='entered'||prev==='approaching') {{
           zSt[z.id]=null;
           if (prev==='entered') alerts.push({{type:'left_all', rl:rl, z:z, dist:dist}});
         }}
       }}
     }});
 
-    // ── PASS 2: fire the highest-priority alert only ──
-    // Priority: entered > approaching > left
-    // "Left Safe Zone" shows ONLY when car has truly exited ALL clusters
-    var nowEntered     = Object.keys(zSt).some(function(id){{ return zSt[id]==='entered'; }});
-    var nowApproaching = Object.keys(zSt).some(function(id){{ return zSt[id]==='approaching'; }});
-
+    // PASS 2: pick one alert to show based on priority
+    // Key rule: "Left Safe" fires when car exits the INNER ring,
+    // UNLESS it is simultaneously inside (entered) a DIFFERENT zone.
+    // Being in the outer approach ring of the same zone is fine — show Left.
+    var nowEntered = Object.keys(zSt).some(function(id){{ return zSt[id]==='entered'; }});
     var toShow = null;
 
-    // 1. Entered a new zone — always show (highest severity first)
+    // 1. Entered — always highest priority
     var entered = alerts.filter(function(a){{ return a.type==='entered'; }});
     if (entered.length>0) {{
       entered.sort(function(a,b){{ return b.z.si-a.z.si; }});
@@ -544,22 +543,22 @@ if (SHOW_CAR && PATHS.length > 0) {{
       toShow.cls  = 'entered';
     }}
 
-    // 2. Approaching — only if not currently inside any zone
+    // 2. Approaching a new zone — only if not inside any zone
     if (!toShow) {{
-      var approaching = alerts.filter(function(a){{ return a.type==='approaching'; }});
-      if (approaching.length>0 && !nowEntered) {{
-        approaching.sort(function(a,b){{ return a.dist-b.dist; }});
-        toShow = approaching[0];
+      var appr = alerts.filter(function(a){{ return a.type==='approaching'; }});
+      if (appr.length>0 && !nowEntered) {{
+        appr.sort(function(a,b){{ return a.dist-b.dist; }});
+        toShow = appr[0];
         toShow.msg  = '⚠️ Approaching '+toShow.rl+' Zone: '+toShow.z.area+' ('+Math.round(toShow.dist)+'m)';
         toShow.full = '⚠️ <b>APPROACHING '+toShow.rl+' RISK ZONE</b> — '+toShow.z.area+' | '+Math.round(toShow.dist)+'m ahead';
         toShow.cls  = 'approaching';
       }}
     }}
 
-    // 3. Left — only show when car has fully exited ALL zones (not entered, not approaching any)
+    // 3. Left inner ring — show "Left Safe" unless inside a DIFFERENT zone
     if (!toShow) {{
       var left = alerts.filter(function(a){{ return a.type==='left_inner'||a.type==='left_all'; }});
-      if (left.length>0 && !nowEntered && !nowApproaching) {{
+      if (left.length>0 && !nowEntered) {{
         toShow = left[0];
         toShow.msg  = '✅ Left '+toShow.rl+' Risk Zone — Safe: '+toShow.z.area;
         toShow.full = '✅ <b>Left '+toShow.rl+' Risk Zone — Safe</b> &nbsp;›&nbsp; '+toShow.z.area;
@@ -569,6 +568,7 @@ if (SHOW_CAR && PATHS.length > 0) {{
 
     if (toShow) addAlert(toShow.msg, toShow.full, toShow.cls);
   }}
+
 
   var idx = startIdx;
   function step() {{
