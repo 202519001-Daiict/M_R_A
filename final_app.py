@@ -1012,88 +1012,6 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 """, unsafe_allow_html=True)
 
         # ── ROUTE NAVIGATION SECTION ──────────────
-        # Use nth-of-type CSS to target inputs by position — works without :has()
-        st.markdown("""
-<style>
-/* Target 1st text input in sidebar = Start */
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) div[data-baseweb="input"] {
-    background:#141929 !important;
-    border:1.5px solid #1e2a3e !important;
-    border-radius:10px !important;
-    padding-left: 36px !important;
-    position: relative !important;
-}
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) div[data-baseweb="input"]::before {
-    content: "" !important;
-    position: absolute !important;
-    left: 12px !important;
-    top: 50% !important;
-    transform: translateY(-50%) !important;
-    width: 12px !important;
-    height: 12px !important;
-    border-radius: 50% !important;
-    background: #4285f4 !important;
-    box-shadow: 0 0 0 3px rgba(66,133,244,0.25) !important;
-    z-index: 10 !important;
-}
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) input {
-    background: transparent !important;
-    color: #e2e8f0 !important;
-    border: none !important;
-    font-size: 0.85rem !important;
-    padding-left: 36px !important;
-}
-
-/* Target 2nd text input in sidebar = Destination */
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) div[data-baseweb="input"] {
-    background:#141929 !important;
-    border:1.5px solid #1e2a3e !important;
-    border-radius:10px !important;
-    padding-left: 36px !important;
-    position: relative !important;
-}
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) div[data-baseweb="input"]::before {
-    content: "" !important;
-    position: absolute !important;
-    left: 11px !important;
-    top: 50% !important;
-    transform: translateY(-50%) !important;
-    width: 0 !important;
-    height: 0 !important;
-    border-left: 7px solid transparent !important;
-    border-right: 7px solid transparent !important;
-    border-top: 13px solid #ea4335 !important;
-    background: none !important;
-    filter: drop-shadow(0 1px 3px rgba(234,67,53,0.5)) !important;
-    z-index: 10 !important;
-}
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) input {
-    background: transparent !important;
-    color: #e2e8f0 !important;
-    border: none !important;
-    font-size: 0.85rem !important;
-    padding-left: 36px !important;
-}
-
-/* Connector line between the two nav inputs */
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) {
-    margin-bottom: -2px !important;
-    position: relative !important;
-}
-
-/* Labels */
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) label,
-section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) label {
-    color: #6b7a8d !important;
-    font-size: 0.68rem !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.5px !important;
-    text-transform: uppercase !important;
-    margin-bottom: 2px !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
         st.markdown("""
 <div style="padding:10px 16px 4px">
   <span style="font-size:0.7rem;font-weight:700;letter-spacing:1px;color:#4285f4;text-transform:uppercase">
@@ -1102,20 +1020,50 @@ section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) label {
 </div>
 """, unsafe_allow_html=True)
 
-        origin_input = st.text_input("Start", key="nav_origin_input",
-            value=st.session_state.nav_origin,
-            placeholder="Start location")
-
-        # Connector line between inputs
+        # Marker A: blue dot label
         st.markdown("""
-<div style="display:flex;align-items:center;padding:0 0 0 22px;margin:-6px 0;height:14px">
-  <div style="width:2px;height:14px;background:linear-gradient(#4285f4,#ea4335);border-radius:1px"></div>
+<div id="nav-origin-label" style="display:flex;align-items:center;gap:8px;
+     margin:4px 0 2px;padding:0 4px">
+  <svg width="18" height="18" viewBox="0 0 18 18">
+    <circle cx="9" cy="9" r="6" fill="#4285f4"/>
+    <circle cx="9" cy="9" r="6" fill="none" stroke="white" stroke-width="2"/>
+    <circle cx="9" cy="9" r="9" fill="#4285f4" fill-opacity="0.18"/>
+  </svg>
+  <span style="font-size:0.72rem;font-weight:700;color:#6b7a8d;letter-spacing:.5px;text-transform:uppercase">Start</span>
 </div>
 """, unsafe_allow_html=True)
 
-        dest_input = st.text_input("Destination", key="nav_dest_input",
+        origin_input = st.text_input("origin", key="nav_origin_input",
+            value=st.session_state.nav_origin,
+            placeholder="Start location",
+            label_visibility="collapsed")
+
+        # Gradient connector line
+        st.markdown("""
+<div style="display:flex;align-items:center;gap:8px;margin:0 0 0 4px;height:16px">
+  <div style="width:18px;display:flex;justify-content:center">
+    <div style="width:2px;height:16px;background:linear-gradient(to bottom,#4285f4,#ea4335);border-radius:2px"></div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        # Marker B: red pin label
+        st.markdown("""
+<div id="nav-dest-label" style="display:flex;align-items:center;gap:8px;
+     margin:2px 0 2px;padding:0 4px">
+  <svg width="18" height="22" viewBox="0 0 18 22">
+    <path d="M9 1 C5.1 1 2 4.1 2 8 C2 13.3 9 21 9 21 C9 21 16 13.3 16 8 C16 4.1 12.9 1 9 1Z"
+          fill="#ea4335" stroke="#c62828" stroke-width="0.8"/>
+    <circle cx="9" cy="8" r="3" fill="white"/>
+  </svg>
+  <span style="font-size:0.72rem;font-weight:700;color:#6b7a8d;letter-spacing:.5px;text-transform:uppercase">Destination</span>
+</div>
+""", unsafe_allow_html=True)
+
+        dest_input = st.text_input("destination", key="nav_dest_input",
             value=st.session_state.nav_dest,
-            placeholder="Destination")
+            placeholder="Destination",
+            label_visibility="collapsed")
 
         nc1, nc2 = st.columns([3,2])
         with nc1: nav_btn   = st.button("🗺️ Get Directions", use_container_width=True, type="primary")
