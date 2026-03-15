@@ -911,39 +911,78 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
         # ── DIVIDER ───────────────────────────────
         st.markdown('<div style="height:1px;background:#1a2035;margin:12px 0"></div>', unsafe_allow_html=True)
 
-        # ── LIVE STATS ────────────────────────────
-        st.markdown("""
-<div style="padding:4px 16px 8px;font-size:0.7rem;font-weight:700;
-            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
-  📊 Live Stats
-</div>
-""", unsafe_allow_html=True)
 
+        # ── LIVE STATS ────────────────────────────
         _df_tmp = load_accident_data()
-        _high   = int((_df_tmp["risk_level"]=="High").sum())
-        _med    = int((_df_tmp["risk_level"]=="Medium").sum())
-        _low    = int((_df_tmp["risk_level"]=="Low").sum())
-        _total  = len(_df_tmp)
+
+        # If a route is active, filter zones that lie along the route bounding box
+        # (between origin and destination, with a small buffer)
+        _nav_o = st.session_state.nav_origin_coord
+        _nav_d = st.session_state.nav_dest_coord
+        _route_active = st.session_state.nav_active and _nav_o and _nav_d
+
+        if _route_active:
+            # Bounding box between origin and destination + 1km buffer (~0.01 deg)
+            _buf  = 0.02
+            _lat_min = min(_nav_o[0], _nav_d[0]) - _buf
+            _lat_max = max(_nav_o[0], _nav_d[0]) + _buf
+            _lng_min = min(_nav_o[1], _nav_d[1]) - _buf
+            _lng_max = max(_nav_o[1], _nav_d[1]) + _buf
+            _stats_df = _df_tmp[
+                (_df_tmp["latitude"]  >= _lat_min) & (_df_tmp["latitude"]  <= _lat_max) &
+                (_df_tmp["longitude"] >= _lng_min) & (_df_tmp["longitude"] <= _lng_max)
+            ]
+            _stats_label = "ON YOUR ROUTE"
+            _label_color = "#4285f4"
+        else:
+            _stats_df    = _df_tmp
+            _stats_label = "ALL ZONES"
+            _label_color = "#556"
+
+        _high  = int((_stats_df["risk_level"]=="High").sum())
+        _med   = int((_stats_df["risk_level"]=="Medium").sum())
+        _low   = int((_stats_df["risk_level"]=="Low").sum())
+        _total = len(_stats_df)
+
+        _route_tag = f'<span style="font-size:0.62rem;color:{_label_color};font-weight:600;letter-spacing:.5px">{_stats_label}</span>' if _route_active else ""
+
         st.markdown(f"""
+<div style="padding:4px 16px 6px;display:flex;align-items:center;justify-content:space-between">
+  <div style="font-size:0.7rem;font-weight:700;letter-spacing:1px;color:#4285f4;text-transform:uppercase">
+    📊 Zone Stats
+  </div>
+  {_route_tag}
+</div>
 <div style="margin:0 0 10px;display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:0.76rem">
   <div style="background:#1a0a0a;border:1px solid #d5000033;border-radius:8px;padding:8px 10px;text-align:center">
-    <div style="color:#d50000;font-size:1.1rem;font-weight:800">{_high}</div>
+    <div style="color:#d50000;font-size:1.3rem;font-weight:800">{_high}</div>
     <div style="color:#778;font-size:0.67rem">High Risk</div>
   </div>
   <div style="background:#1a100a;border:1px solid #ff6d0033;border-radius:8px;padding:8px 10px;text-align:center">
-    <div style="color:#ff6d00;font-size:1.1rem;font-weight:800">{_med}</div>
+    <div style="color:#ff6d00;font-size:1.3rem;font-weight:800">{_med}</div>
     <div style="color:#778;font-size:0.67rem">Medium Risk</div>
   </div>
   <div style="background:#1a1a0a;border:1px solid #ffd60033;border-radius:8px;padding:8px 10px;text-align:center">
-    <div style="color:#ffd600;font-size:1.1rem;font-weight:800">{_low}</div>
+    <div style="color:#ffd600;font-size:1.3rem;font-weight:800">{_low}</div>
     <div style="color:#778;font-size:0.67rem">Low Risk</div>
   </div>
   <div style="background:#0a0f1a;border:1px solid #4285f433;border-radius:8px;padding:8px 10px;text-align:center">
-    <div style="color:#4285f4;font-size:1.1rem;font-weight:800">{_total}</div>
+    <div style="color:#4285f4;font-size:1.3rem;font-weight:800">{_total}</div>
     <div style="color:#778;font-size:0.67rem">Total Zones</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+        if _route_active:
+            st.markdown(f"""
+<div style="margin:-4px 0 10px;background:#0a0f1a;border:1px solid #1e2a3e;
+            border-radius:8px;padding:7px 12px;font-size:0.72rem;
+            color:#4285f4;text-align:center">
+  Zones between<br>
+  <b style="color:#e2e8f0">{st.session_state.nav_origin}</b>
+  <span style="color:#556"> → </span>
+  <b style="color:#e2e8f0">{st.session_state.nav_dest}</b>
+</div>""", unsafe_allow_html=True)
 
         # ── FOOTER ────────────────────────────────
         st.markdown("""
