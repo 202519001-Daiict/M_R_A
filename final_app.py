@@ -1012,57 +1012,110 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 """, unsafe_allow_html=True)
 
         # ── ROUTE NAVIGATION SECTION ──────────────
+        # Use nth-of-type CSS to target inputs by position — works without :has()
         st.markdown("""
-<div style="padding:14px 16px 6px">
-  <div style="font-size:0.7rem;font-weight:700;letter-spacing:1px;color:#4285f4;text-transform:uppercase">
-    🧭 Route Navigation
-  </div>
-</div>
-
 <style>
-/* Blue dot on Start input */
-div[data-testid="stSidebar"] [data-testid="stTextInput"]:has(input[aria-label="Start"]) input {
-    padding-left: 32px !important;
-    background-image: radial-gradient(circle, #4285f4 5px, transparent 5px) !important;
-    background-repeat: no-repeat !important;
-    background-position: 10px center !important;
-    background-size: 20px 20px !important;
-    background-color: #141929 !important;
+/* Target 1st text input in sidebar = Start */
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) div[data-baseweb="input"] {
+    background:#141929 !important;
+    border:1.5px solid #1e2a3e !important;
+    border-radius:10px !important;
+    padding-left: 36px !important;
+    position: relative !important;
 }
-/* Red pin on Destination input */
-div[data-testid="stSidebar"] [data-testid="stTextInput"]:has(input[aria-label="Destination"]) input {
-    padding-left: 32px !important;
-    background-image: radial-gradient(circle, #ea4335 5px, transparent 5px) !important;
-    background-repeat: no-repeat !important;
-    background-position: 10px center !important;
-    background-size: 20px 20px !important;
-    background-color: #141929 !important;
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) div[data-baseweb="input"]::before {
+    content: "" !important;
+    position: absolute !important;
+    left: 12px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 12px !important;
+    height: 12px !important;
+    border-radius: 50% !important;
+    background: #4285f4 !important;
+    box-shadow: 0 0 0 3px rgba(66,133,244,0.25) !important;
+    z-index: 10 !important;
 }
-/* Connector line between the two inputs */
-div[data-testid="stSidebar"] [data-testid="stTextInput"]:has(input[aria-label="Start"]) {
-    margin-bottom: 0 !important;
-    padding-bottom: 0 !important;
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) input {
+    background: transparent !important;
+    color: #e2e8f0 !important;
+    border: none !important;
+    font-size: 0.85rem !important;
+    padding-left: 36px !important;
 }
-div[data-testid="stSidebar"] [data-testid="stTextInput"]:has(input[aria-label="Start"])::after {
-    content: '';
-    display: block;
-    width: 2px;
-    height: 12px;
-    background: linear-gradient(#4285f4, #ea4335);
-    margin-left: 19px;
-    margin-top: -1px;
+
+/* Target 2nd text input in sidebar = Destination */
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) div[data-baseweb="input"] {
+    background:#141929 !important;
+    border:1.5px solid #1e2a3e !important;
+    border-radius:10px !important;
+    padding-left: 36px !important;
+    position: relative !important;
+}
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) div[data-baseweb="input"]::before {
+    content: "" !important;
+    position: absolute !important;
+    left: 11px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 0 !important;
+    height: 0 !important;
+    border-left: 7px solid transparent !important;
+    border-right: 7px solid transparent !important;
+    border-top: 13px solid #ea4335 !important;
+    background: none !important;
+    filter: drop-shadow(0 1px 3px rgba(234,67,53,0.5)) !important;
+    z-index: 10 !important;
+}
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) input {
+    background: transparent !important;
+    color: #e2e8f0 !important;
+    border: none !important;
+    font-size: 0.85rem !important;
+    padding-left: 36px !important;
+}
+
+/* Connector line between the two nav inputs */
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) {
+    margin-bottom: -2px !important;
+    position: relative !important;
+}
+
+/* Labels */
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(1) label,
+section[data-testid="stSidebar"] .stTextInput:nth-of-type(2) label {
+    color: #6b7a8d !important;
+    font-size: 0.68rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+    margin-bottom: 2px !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
+        st.markdown("""
+<div style="padding:10px 16px 4px">
+  <span style="font-size:0.7rem;font-weight:700;letter-spacing:1px;color:#4285f4;text-transform:uppercase">
+    🧭 Route Navigation
+  </span>
+</div>
+""", unsafe_allow_html=True)
+
         origin_input = st.text_input("Start", key="nav_origin_input",
             value=st.session_state.nav_origin,
-            placeholder="Start location",
-            label_visibility="collapsed")
-        dest_input   = st.text_input("Destination", key="nav_dest_input",
+            placeholder="Start location")
+
+        # Connector line between inputs
+        st.markdown("""
+<div style="display:flex;align-items:center;padding:0 0 0 22px;margin:-6px 0;height:14px">
+  <div style="width:2px;height:14px;background:linear-gradient(#4285f4,#ea4335);border-radius:1px"></div>
+</div>
+""", unsafe_allow_html=True)
+
+        dest_input = st.text_input("Destination", key="nav_dest_input",
             value=st.session_state.nav_dest,
-            placeholder="Destination",
-            label_visibility="collapsed")
+            placeholder="Destination")
 
         nc1, nc2 = st.columns([3,2])
         with nc1: nav_btn   = st.button("🗺️ Get Directions", use_container_width=True, type="primary")
