@@ -76,12 +76,41 @@ def load_driver_path() -> list:
     for row in rows:
         coords = decode_wkb_linestring(str(row.get("geom", "")))
         if coords:
+            start_lat, start_lng = coords[0][0],  coords[0][1]
+            end_lat,   end_lng   = coords[-1][0], coords[-1][1]
             all_paths.append({
                 "id":          row.get("id"),
                 "created_at":  str(row.get("created_at", "")),
                 "coordinates": coords,
+                "start_coord": [start_lat, start_lng],
+                "end_coord":   [end_lat,   end_lng],
+                "start_name":  _reverse_geocode(start_lat, start_lng),
+                "end_name":    _reverse_geocode(end_lat,   end_lng),
             })
     return all_paths
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _reverse_geocode(lat: float, lng: float) -> str:
+    """Return a short human-readable place name for a lat/lng coordinate."""
+    try:
+        geo = Nominatim(user_agent="road_risk_nav_revgeo", timeout=8)
+        loc = geo.reverse((lat, lng), language="en", exactly_one=True)
+        if not loc:
+            return f"{lat:.4f}, {lng:.4f}"
+        addr = loc.raw.get("address", {})
+        # Build short name: neighbourhood/suburb/road + city
+        parts = []
+        for key in ["road", "neighbourhood", "suburb", "quarter"]:
+            if addr.get(key):
+                parts.append(addr[key])
+                break
+        for key in ["city_district", "suburb", "city", "town", "village"]:
+            if addr.get(key):
+                parts.append(addr[key])
+                break
+        return ", ".join(parts) if parts else loc.address.split(",")[0]
+    except Exception:
+        return f"{lat:.4f}, {lng:.4f}"
 
 # ─────────────────────────────────────────────
 # 3. WKB GEOMETRY DECODER
@@ -163,6 +192,10 @@ def build_leaflet_map(accident_df: pd.DataFrame,
                        center_lng: float = 72.877,
                        search_zones: list = None,
                        search_label: str = "",
+                       nav_origin_coord=None,
+                       nav_dest_coord=None,
+                       nav_origin_name: str = "",
+                       nav_dest_name: str = "",
                        show_car: bool = False) -> str:
 
     zones_js    = json.dumps([
@@ -172,7 +205,11 @@ def build_leaflet_map(accident_df: pd.DataFrame,
          "ta":int(r.get("total_accident",0)),"tf":int(r.get("total_fatality",0))}
         for _,r in accident_df.iterrows()
     ])
-    paths_js    = json.dumps([{"id":p["id"],"coords":p["coordinates"]} for p in driver_paths])
+    paths_js        = json.dumps([{"id":p["id"],"coords":p["coordinates"]} for p in driver_paths])
+    nav_origin_js   = json.dumps(list(nav_origin_coord) if nav_origin_coord else None)
+    nav_dest_js     = json.dumps(list(nav_dest_coord)   if nav_dest_coord   else None)
+    nav_oname_js    = json.dumps(nav_origin_name)
+    nav_dname_js    = json.dumps(nav_dest_name)
     sz_ids_js   = json.dumps([z["id"]  for z in search_zones] if search_zones else [])
     sz_data_js  = json.dumps(search_zones if search_zones else [])
     sz_label_js = json.dumps(search_label)
@@ -293,6 +330,11 @@ const SZ_IDS    = new Set({sz_ids_js});
 const SZ_DATA   = {sz_data_js};
 const SZ_LABEL  = {sz_label_js};
 const SHOW_CAR  = {show_car_js};
+const NAV_ORIGIN = {nav_origin_js};
+const NAV_DEST   = {nav_dest_js};
+const NAV_ONAME  = {nav_oname_js};
+const NAV_DNAME  = {nav_dname_js};
+const NAV_ACTIVE = !!(NAV_ORIGIN && NAV_DEST);
 const APPROACH_R = 500;
 const ENTER_R    = 120;
 const HAS_SEARCH = SZ_IDS.size > 0;
@@ -300,7 +342,6 @@ const LS_IDX    = 'riskmap_car_idx';
 const LS_TRAIL  = 'riskmap_trail';
 
 // ── MAP INIT ─────────────────────────────────
-// preferCanvas MUST be false — it breaks divIcon (causes ghost/duplicate car)
 const map = L.map('map', {{zoomControl:true, preferCanvas:false}})
               .setView([{center_lat}, {center_lng}], 13);
 // ── 5 BASE LAYERS + localStorage persistence ──
@@ -312,6 +353,39 @@ const BL = {{
   topo     : L.tileLayer('https://{{s}}.tile.opentopomap.org/{{z}}/{{x}}/{{y}}.png',                  {{attribution:'&copy; OSM &copy; OpenTopoMap',subdomains:'abc',maxZoom:17}}),
 }};
 BL[localStorage.getItem('riskmap_bl')||'dark'].addTo(map);
+
+// ── NAVIGATION MARKERS ────────────────────────
+// Show start pin (green) and destination pin (red) when user sets a route
+if (NAV_ACTIVE) {{
+  // Origin marker
+  L.marker(NAV_ORIGIN, {{icon: L.divIcon({{
+    className:'',
+    html:`<div style="display:flex;flex-direction:column;align-items:center">
+      <div style="background:#00c853;width:18px;height:18px;border-radius:50%;
+           border:3px solid #fff;box-shadow:0 0 12px #00c853;"></div>
+      <div style="background:#00c853;width:2px;height:12px;"></div>
+    </div>`,
+    iconSize:[18,30], iconAnchor:[9,30]
+  }})}})
+  .bindPopup(`<b style="color:#00c853">🟢 Start</b><br>${{NAV_ONAME}}`)
+  .addTo(map).openPopup();
+
+  // Destination marker
+  L.marker(NAV_DEST, {{icon: L.divIcon({{
+    className:'',
+    html:`<div style="display:flex;flex-direction:column;align-items:center">
+      <div style="background:#d50000;width:18px;height:18px;border-radius:50%;
+           border:3px solid #fff;box-shadow:0 0 12px #d50000;"></div>
+      <div style="background:#d50000;width:2px;height:12px;"></div>
+    </div>`,
+    iconSize:[18,30], iconAnchor:[9,30]
+  }})}})
+  .bindPopup(`<b style="color:#d50000">🔴 Destination</b><br>${{NAV_DNAME}}`)
+  .addTo(map);
+
+  // Fit map to show both pins with padding
+  map.fitBounds([NAV_ORIGIN, NAV_DEST], {{padding:[60,60], maxZoom:15, animate:true}});
+}}
 
 // ── HELPERS ──────────────────────────────────
 // Use actual DB risk_level field for colors — matches what the table shows
@@ -627,7 +701,9 @@ def alert_box(level: str, text: str):
 # ─────────────────────────────────────────────
 def main():
     defaults = dict(running=False, highlight_point=None, highlight_label="",
-                    search_query="", search_zones=None, risk_info=None, search_error="")
+                    search_query="", search_zones=None, risk_info=None, search_error="",
+                    nav_origin="", nav_dest="", nav_origin_coord=None, nav_dest_coord=None,
+                    nav_error="", nav_active=False)
     for k,v in defaults.items():
         if k not in st.session_state: st.session_state[k]=v
 
@@ -645,6 +721,31 @@ def main():
             st.success("🟢 Car simulation active.")
         else:
             st.info("⏸ Press Start to begin.")
+        st.divider()
+
+        # ── ROUTE NAVIGATION ──────────────────────
+        st.subheader("🧭 Route Navigation")
+
+        origin_input = st.text_input("📍 Start Location",
+            value=st.session_state.nav_origin,
+            placeholder="e.g. Jogeshwari, Mumbai")
+        dest_input = st.text_input("🏁 Destination",
+            value=st.session_state.nav_dest,
+            placeholder="e.g. Vikhroli, Mumbai")
+
+        nc1, nc2 = st.columns(2)
+        with nc1: nav_btn   = st.button("🗺️ Set Route",   use_container_width=True, type="primary")
+        with nc2: nav_clear = st.button("✖ Clear Route", use_container_width=True)
+
+        if st.session_state.nav_active and st.session_state.nav_origin and st.session_state.nav_dest:
+            st.markdown(f"""
+<div style="background:#0d1f0d;border:1px solid #00c85344;border-radius:8px;padding:8px 12px;font-size:0.78rem">
+  <div style="color:#00c853;margin-bottom:4px">🟢 <b>From:</b> {st.session_state.nav_origin}</div>
+  <div style="color:#d50000">🔴 <b>To:</b> {st.session_state.nav_dest}</div>
+</div>""", unsafe_allow_html=True)
+
+        if st.session_state.nav_error:
+            st.error(st.session_state.nav_error)
         st.divider()
 
         st.subheader("📍 Location Search")
@@ -669,6 +770,34 @@ def main():
     if stop_btn:
         st.session_state.running = False
         st.rerun()
+
+    # ── NAV ROUTE SET ──────────────────────────
+    if nav_clear:
+        st.session_state.nav_origin       = ""
+        st.session_state.nav_dest         = ""
+        st.session_state.nav_origin_coord = None
+        st.session_state.nav_dest_coord   = None
+        st.session_state.nav_error        = ""
+        st.session_state.nav_active       = False
+        st.rerun()
+
+    if nav_btn and origin_input and dest_input:
+        accident_df_tmp = load_accident_data()
+        o = resolve_location(origin_input.strip(), accident_df_tmp)
+        d = resolve_location(dest_input.strip(),   accident_df_tmp)
+        if not o:
+            st.session_state.nav_error = f"❌ Could not find start location: '{origin_input}'"
+        elif not d:
+            st.session_state.nav_error = f"❌ Could not find destination: '{dest_input}'"
+        else:
+            st.session_state.nav_origin       = origin_input.strip()
+            st.session_state.nav_dest         = dest_input.strip()
+            st.session_state.nav_origin_coord = [o[0], o[1]]
+            st.session_state.nav_dest_coord   = [d[0], d[1]]
+            st.session_state.nav_error        = ""
+            st.session_state.nav_active       = True
+            # Clear saved car position so it restarts from new origin
+            st.rerun()
 
     accident_df  = load_accident_data()
     driver_paths = load_driver_path()
@@ -742,19 +871,32 @@ def main():
         st.dataframe(near_df, use_container_width=True, hide_index=True)
 
     st.subheader("🗺️ Interactive Risk Map  •  🚗 Live Car Simulation")
-    st.caption("Car moves along the driver path. Alert bar at bottom shows real-time zone alerts.")
+    if st.session_state.nav_active:
+        st.caption(f"🟢 **{st.session_state.nav_origin}** → 🔴 **{st.session_state.nav_dest}**")
+    else:
+        st.caption("Car moves along the driver path. Alert bar at bottom shows real-time zone alerts.")
 
-    center_lat = float(display_df["latitude"].mean())  if not display_df.empty else 19.076
-    center_lng = float(display_df["longitude"].mean()) if not display_df.empty else 72.877
+    # Center on route midpoint if nav is active
+    if st.session_state.nav_active and st.session_state.nav_origin_coord and st.session_state.nav_dest_coord:
+        o, d = st.session_state.nav_origin_coord, st.session_state.nav_dest_coord
+        center_lat = (o[0] + d[0]) / 2
+        center_lng = (o[1] + d[1]) / 2
+    else:
+        center_lat = float(display_df["latitude"].mean())  if not display_df.empty else 19.076
+        center_lng = float(display_df["longitude"].mean()) if not display_df.empty else 72.877
 
     map_html = build_leaflet_map(
-        accident_df  = display_df,
-        driver_paths = display_paths,
-        center_lat   = center_lat,
-        center_lng   = center_lng,
-        search_zones = st.session_state.search_zones,
-        search_label = st.session_state.highlight_label,
-        show_car     = st.session_state.running,
+        accident_df       = display_df,
+        driver_paths      = display_paths,
+        center_lat        = center_lat,
+        center_lng        = center_lng,
+        search_zones      = st.session_state.search_zones,
+        search_label      = st.session_state.highlight_label,
+        nav_origin_coord  = st.session_state.nav_origin_coord,
+        nav_dest_coord    = st.session_state.nav_dest_coord,
+        nav_origin_name   = st.session_state.nav_origin,
+        nav_dest_name     = st.session_state.nav_dest,
+        show_car          = st.session_state.running,
     )
     components.html(map_html, height=700, scrolling=False)
 
