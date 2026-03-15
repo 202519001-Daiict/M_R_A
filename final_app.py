@@ -952,12 +952,22 @@ section[data-testid="stSidebar"] .stTextInput input {
     border-radius: 8px !important;
     color: #e2e8f0 !important;
     font-size: 0.85rem !important;
+    padding: 8px 12px !important;
 }
 section[data-testid="stSidebar"] .stTextInput input:focus {
     border-color: #4285f4 !important;
     box-shadow: 0 0 0 2px rgba(66,133,244,0.2) !important;
 }
-section[data-testid="stSidebar"] .stTextInput label { color: #8899aa !important; font-size:0.72rem !important; }
+section[data-testid="stSidebar"] .stTextInput label {
+    color: #4a5568 !important;
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.3px !important;
+}
+/* Tighten gap between inputs so dots align */
+section[data-testid="stSidebar"] .stTextInput {
+    margin-bottom: -6px !important;
+}
 
 /* Button styling */
 section[data-testid="stSidebar"] .stButton > button {
@@ -1003,40 +1013,55 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 
         # ── ROUTE NAVIGATION SECTION ──────────────
         st.markdown("""
-<div style="padding:14px 16px 2px">
+<div style="padding:14px 16px 6px">
   <div style="font-size:0.7rem;font-weight:700;letter-spacing:1px;color:#4285f4;text-transform:uppercase">
     🧭 Route Navigation
   </div>
 </div>
-""", unsafe_allow_html=True)
 
-        # Input card with connector line visual
-        st.markdown("""
-<div style="margin:4px 12px 8px;padding:10px 12px;background:#141929;
-            border:1px solid #1e2a3e;border-radius:12px">
-  <div style="display:flex;gap:10px;align-items:stretch">
-    <div style="display:flex;flex-direction:column;align-items:center;padding:4px 0;flex-shrink:0">
-      <div style="width:10px;height:10px;border-radius:50%;background:#4285f4;
-                  border:2px solid #fff;box-shadow:0 0 6px #4285f488;margin-top:10px"></div>
-      <div style="width:2px;flex:1;background:linear-gradient(#4285f4,#ea4335);margin:4px 0"></div>
-      <div style="width:10px;height:10px;border-radius:50%;background:#ea4335;
-                  border:2px solid #fff;box-shadow:0 0 6px #ea433588;margin-bottom:10px"></div>
-    </div>
-    <div style="flex:1;font-size:0.7rem;color:#6b7a8d">
-      <div style="margin-bottom:28px">Start location</div>
-      <div>Destination</div>
-    </div>
-  </div>
-</div>
+<style>
+/* Blue dot on Start input */
+div[data-testid="stSidebar"] [data-testid="stTextInput"]:has(input[aria-label="Start"]) input {
+    padding-left: 32px !important;
+    background-image: radial-gradient(circle, #4285f4 5px, transparent 5px) !important;
+    background-repeat: no-repeat !important;
+    background-position: 10px center !important;
+    background-size: 20px 20px !important;
+    background-color: #141929 !important;
+}
+/* Red pin on Destination input */
+div[data-testid="stSidebar"] [data-testid="stTextInput"]:has(input[aria-label="Destination"]) input {
+    padding-left: 32px !important;
+    background-image: radial-gradient(circle, #ea4335 5px, transparent 5px) !important;
+    background-repeat: no-repeat !important;
+    background-position: 10px center !important;
+    background-size: 20px 20px !important;
+    background-color: #141929 !important;
+}
+/* Connector line between the two inputs */
+div[data-testid="stSidebar"] [data-testid="stTextInput"]:has(input[aria-label="Start"]) {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+}
+div[data-testid="stSidebar"] [data-testid="stTextInput"]:has(input[aria-label="Start"])::after {
+    content: '';
+    display: block;
+    width: 2px;
+    height: 12px;
+    background: linear-gradient(#4285f4, #ea4335);
+    margin-left: 19px;
+    margin-top: -1px;
+}
+</style>
 """, unsafe_allow_html=True)
 
         origin_input = st.text_input("Start", key="nav_origin_input",
             value=st.session_state.nav_origin,
-            placeholder="e.g. Jogeshwari, Mumbai",
+            placeholder="Start location",
             label_visibility="collapsed")
-        dest_input = st.text_input("Destination", key="nav_dest_input",
+        dest_input   = st.text_input("Destination", key="nav_dest_input",
             value=st.session_state.nav_dest,
-            placeholder="e.g. Vikhroli, Mumbai",
+            placeholder="Destination",
             label_visibility="collapsed")
 
         nc1, nc2 = st.columns([3,2])
