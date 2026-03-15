@@ -990,8 +990,8 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 
         # ── APP HEADER ────────────────────────────
         st.markdown("""
-<div style="background:linear-gradient(135deg,#1a73e8,#0d47a1);padding:20px 20px 16px;margin-bottom:0">
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+<div style="background:linear-gradient(135deg,#1a73e8,#0d47a1);padding:20px 20px 18px;margin-bottom:0">
+  <div style="display:flex;align-items:center;gap:12px">
     <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:8px;font-size:1.4rem">🚦</div>
     <div>
       <div style="color:#fff;font-size:1.05rem;font-weight:700;line-height:1.2">Road Risk Navigator</div>
@@ -1001,13 +1001,43 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 </div>
 """, unsafe_allow_html=True)
 
-        # ── NAVIGATION INPUTS ─────────────────────────
-        origin_input = st.text_input("📍 Start", key="nav_origin_input",
+        # ── ROUTE NAVIGATION SECTION ──────────────
+        st.markdown("""
+<div style="padding:14px 16px 2px">
+  <div style="font-size:0.7rem;font-weight:700;letter-spacing:1px;color:#4285f4;text-transform:uppercase">
+    🧭 Route Navigation
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        # Input card with connector line visual
+        st.markdown("""
+<div style="margin:4px 12px 8px;padding:10px 12px;background:#141929;
+            border:1px solid #1e2a3e;border-radius:12px">
+  <div style="display:flex;gap:10px;align-items:stretch">
+    <div style="display:flex;flex-direction:column;align-items:center;padding:4px 0;flex-shrink:0">
+      <div style="width:10px;height:10px;border-radius:50%;background:#4285f4;
+                  border:2px solid #fff;box-shadow:0 0 6px #4285f488;margin-top:10px"></div>
+      <div style="width:2px;flex:1;background:linear-gradient(#4285f4,#ea4335);margin:4px 0"></div>
+      <div style="width:10px;height:10px;border-radius:50%;background:#ea4335;
+                  border:2px solid #fff;box-shadow:0 0 6px #ea433588;margin-bottom:10px"></div>
+    </div>
+    <div style="flex:1;font-size:0.7rem;color:#6b7a8d">
+      <div style="margin-bottom:28px">Start location</div>
+      <div>Destination</div>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        origin_input = st.text_input("Start", key="nav_origin_input",
             value=st.session_state.nav_origin,
-            placeholder="e.g. Jogeshwari, Mumbai")
-        dest_input = st.text_input("🏁 Destination", key="nav_dest_input",
+            placeholder="e.g. Jogeshwari, Mumbai",
+            label_visibility="collapsed")
+        dest_input = st.text_input("Destination", key="nav_dest_input",
             value=st.session_state.nav_dest,
-            placeholder="e.g. Vikhroli, Mumbai")
+            placeholder="e.g. Vikhroli, Mumbai",
+            label_visibility="collapsed")
 
         nc1, nc2 = st.columns([3,2])
         with nc1: nav_btn   = st.button("🗺️ Get Directions", use_container_width=True, type="primary")
