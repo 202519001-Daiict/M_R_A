@@ -226,7 +226,13 @@ def build_leaflet_map(accident_df: pd.DataFrame,
   * {{ box-sizing:border-box; margin:0; padding:0; }}
   body, html {{ height:100%; background:#0e1117; font-family:sans-serif; }}
   #wrapper {{ display:flex; flex-direction:column; height:100vh; }}
-  #map {{ flex:1; min-height:0; }}
+  #map {{ flex:1; min-height:0; position:relative; }}
+  /* overlay sits ON TOP of leaflet, outside its event system */
+  #mapOverlay {{
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    pointer-events:none; z-index:2000;
+  }}
+  #mapOverlay > * {{ pointer-events:all; }}
 
   /* ── Single alert bar (one message at a time) ── */
   #alertFeed {{
@@ -307,7 +313,7 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 
   /* ── Google Maps–style layers button ── */
   #layerBtn{{
-    position:absolute;top:12px;right:12px;z-index:1003;
+    position:absolute;top:12px;right:12px;z-index:2001;
     width:44px;height:44px;border-radius:10px;
     background:#fff;border:none;cursor:pointer;
     box-shadow:0 2px 10px rgba(0,0,0,0.3);
@@ -316,13 +322,11 @@ def build_leaflet_map(accident_df: pd.DataFrame,
   }}
   #layerBtn:hover{{box-shadow:0 4px 16px rgba(0,0,0,0.4);transform:scale(1.05);}}
   #layerBtn.active{{background:#e8f0fe;box-shadow:0 4px 16px rgba(66,133,244,0.4);}}
-
-  /* ── Layer picker panel ── */
   #layerPanel{{
-    position:absolute;top:64px;right:12px;z-index:1003;
+    position:absolute;top:64px;right:12px;z-index:2001;
     background:#fff;border-radius:14px;
     box-shadow:0 4px 20px rgba(0,0,0,0.25);
-    width:200px;padding:12px 0 8px;
+    width:210px;padding:12px 0 8px;
     display:none;animation:fadeDown 0.2s ease;
   }}
   @keyframes fadeDown{{from{{opacity:0;transform:translateY(-8px);}}to{{opacity:1;transform:translateY(0);}}}}
@@ -356,29 +360,37 @@ def build_leaflet_map(accident_df: pd.DataFrame,
 <div id="wrapper">
   <div id="map">
     <div id="mapAlert"></div>
-    <!-- Google Maps–style layers button -->
+    <div id="srPanel">
+      <div id="srHead">
+        <h3 id="srTitle">📍 Search Results</h3>
+        <button id="srClose" onclick="closeSR()">✕</button>
+      </div>
+      <div id="srScroll"><div id="srBody"></div></div>
+    </div>
+  </div>
+  <!-- mapOverlay: sits above Leaflet, pointer-events handled separately -->
+  <div id="mapOverlay">
     <button id="layerBtn" onclick="toggleLayerPanel()" title="Map layers">🗺️</button>
-    <!-- Layer picker panel -->
     <div id="layerPanel">
       <div class="lp-title">Map Type</div>
-      <div id="lp-dark"     class="lp-row selected" onclick="setBase('dark')">
-        <div class="lp-dot" style="background:#2c3e50">🌑</div><span>Dark</span>
+      <div id="lp-dark"      class="lp-row selected" onclick="setBase('dark')">
+        <div class="lp-dot" style="background:#1a1a2e">🌑</div><span>Dark</span>
         <div class="lp-radio on" id="r-dark"></div>
       </div>
-      <div id="lp-light"    class="lp-row" onclick="setBase('light')">
-        <div class="lp-dot" style="background:#f5f5f5">☀️</div><span>Light</span>
+      <div id="lp-light"     class="lp-row" onclick="setBase('light')">
+        <div class="lp-dot" style="background:#f0f0f0">☀️</div><span>Light</span>
         <div class="lp-radio" id="r-light"></div>
       </div>
-      <div id="lp-street"   class="lp-row" onclick="setBase('street')">
-        <div class="lp-dot" style="background:#e8f4ea">🗺️</div><span>Street</span>
+      <div id="lp-street"    class="lp-row" onclick="setBase('street')">
+        <div class="lp-dot" style="background:#e8f5e9">🗺️</div><span>Street</span>
         <div class="lp-radio" id="r-street"></div>
       </div>
       <div id="lp-satellite" class="lp-row" onclick="setBase('satellite')">
-        <div class="lp-dot" style="background:#1a2a3a">🛰️</div><span>Satellite</span>
+        <div class="lp-dot" style="background:#0d1b2a">🛰️</div><span>Satellite</span>
         <div class="lp-radio" id="r-satellite"></div>
       </div>
-      <div id="lp-topo"     class="lp-row" onclick="setBase('topo')">
-        <div class="lp-dot" style="background:#d4e6c3">🏔️</div><span>Topo</span>
+      <div id="lp-topo"      class="lp-row" onclick="setBase('topo')">
+        <div class="lp-dot" style="background:#d5e8c4">🏔️</div><span>Topo</span>
         <div class="lp-radio" id="r-topo"></div>
       </div>
       <div class="lp-divider"></div>
@@ -391,13 +403,6 @@ def build_leaflet_map(accident_df: pd.DataFrame,
         <div class="lp-dot" style="background:#e8f0fe">🛣️</div><span>Driver Paths</span>
         <div class="lp-check on" id="c-paths">✓</div>
       </div>
-    </div>
-    <div id="srPanel">
-      <div id="srHead">
-        <h3 id="srTitle">📍 Search Results</h3>
-        <button id="srClose" onclick="closeSR()">✕</button>
-      </div>
-      <div id="srScroll"><div id="srBody"></div></div>
     </div>
   </div>
   <div id="alertFeed">
@@ -606,10 +611,14 @@ function toggleLayerPanel() {{
   btn.classList.toggle('active', !open);
 }}
 
-// Close panel when clicking outside
+// Close panel when clicking the map (not the overlay)
 map.on('click', function() {{
   document.getElementById('layerPanel').classList.remove('open');
   document.getElementById('layerBtn').classList.remove('active');
+}});
+// Prevent map click from firing when clicking overlay
+document.getElementById('mapOverlay').addEventListener('click', function(e) {{
+  e.stopPropagation();
 }});
 
 function setBase(name) {{
