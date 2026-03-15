@@ -497,28 +497,79 @@ if (SHOW_CAR && PATHS.length > 0) {{
   var zSt   = {{}};
 
   function checkZones(lat, lng) {{
+    // ── PASS 1: update every zone's state silently ──
+    var alerts = [];   // collect alerts to fire after all states are known
+
     ZONES.forEach(function(z) {{
-      var dist=haversineM(lat,lng,z.lat,z.lng), prev=zSt[z.id]||null, rl=(z.risk||'RISK').toUpperCase();
+      var dist = haversineM(lat,lng,z.lat,z.lng);
+      var prev = zSt[z.id]||null;
+      var rl   = (z.risk||'RISK').toUpperCase();
+
       if (dist<=ENTER_R) {{
         if (prev!=='entered') {{
           zSt[z.id]='entered';
-          addAlert('🚨 Entered '+rl+' Zone: '+z.area,
-            '🚨 <b>ENTERED '+rl+' RISK ZONE</b> — '+z.area+' | '+z.loc+' | Severity '+z.si.toFixed(1),'entered');
+          alerts.push({{type:'entered', rl:rl, z:z, dist:dist}});
         }}
       }} else if (dist<=APPROACH_R) {{
         if (prev==='entered') {{
           zSt[z.id]='approaching';
-          addAlert('✅ Left '+rl+' Zone — Safe: '+z.area,'✅ <b>Left '+rl+' Risk Zone — Safe</b> &nbsp;›&nbsp; '+z.area,'left');
+          alerts.push({{type:'left_inner', rl:rl, z:z, dist:dist}});
         }} else if (prev===null) {{
           zSt[z.id]='approaching';
-          addAlert('⚠️ Approaching '+rl+' Zone: '+z.area+' ('+Math.round(dist)+'m)',
-            '⚠️ <b>APPROACHING '+rl+' RISK ZONE</b> — '+z.area+' | '+Math.round(dist)+'m ahead','approaching');
+          alerts.push({{type:'approaching', rl:rl, z:z, dist:dist}});
         }}
       }} else {{
-        if (prev==='entered') {{ zSt[z.id]=null; addAlert('✅ Left '+rl+' Zone — Safe: '+z.area,'✅ <b>Left '+rl+' Risk Zone — Safe</b> &nbsp;›&nbsp; '+z.area,'left'); }}
-        else if (prev==='approaching') {{ zSt[z.id]=null; }}
+        if (prev==='entered' || prev==='approaching') {{
+          zSt[z.id]=null;
+          if (prev==='entered') alerts.push({{type:'left_all', rl:rl, z:z, dist:dist}});
+        }}
       }}
     }});
+
+    // ── PASS 2: fire the highest-priority alert only ──
+    // Priority: entered > approaching > left
+    // Never show "Left" if the car is simultaneously inside or approaching another zone
+    var nowEntered    = Object.keys(zSt).some(function(id){{ return zSt[id]==='entered'; }});
+    var nowApproaching= Object.keys(zSt).some(function(id){{ return zSt[id]==='approaching'; }});
+
+    // Find highest priority alert to show
+    var toShow = null;
+
+    // 1. Entered a new zone — always show
+    var entered = alerts.filter(function(a){{ return a.type==='entered'; }});
+    if (entered.length>0) {{
+      // Show the highest severity one
+      entered.sort(function(a,b){{ return b.z.si-a.z.si; }});
+      toShow = entered[0];
+      toShow.msg = '🚨 Entered '+toShow.rl+' Zone: '+toShow.z.area;
+      toShow.full= '🚨 <b>ENTERED '+toShow.rl+' RISK ZONE</b> — '+toShow.z.area+' | '+toShow.z.loc+' | Severity '+toShow.z.si.toFixed(1);
+      toShow.cls = 'entered';
+    }}
+
+    // 2. Approaching — only if not already in a zone
+    if (!toShow) {{
+      var approaching = alerts.filter(function(a){{ return a.type==='approaching'; }});
+      if (approaching.length>0 && !nowEntered) {{
+        approaching.sort(function(a,b){{ return a.dist-b.dist; }});
+        toShow = approaching[0];
+        toShow.msg = '⚠️ Approaching '+toShow.rl+' Zone: '+toShow.z.area+' ('+Math.round(toShow.dist)+'m)';
+        toShow.full= '⚠️ <b>APPROACHING '+toShow.rl+' RISK ZONE</b> — '+toShow.z.area+' | '+Math.round(toShow.dist)+'m ahead';
+        toShow.cls = 'approaching';
+      }}
+    }}
+
+    // 3. Left — only show if car is NOT inside or approaching any other zone
+    if (!toShow) {{
+      var left = alerts.filter(function(a){{ return a.type==='left_inner'||a.type==='left_all'; }});
+      if (left.length>0 && !nowEntered && !nowApproaching) {{
+        toShow = left[0];
+        toShow.msg = '✅ Clear — No risk zones nearby';
+        toShow.full= '✅ <b>Left Risk Zone — Road is clear</b> &nbsp;›&nbsp; '+toShow.z.area;
+        toShow.cls = 'left';
+      }}
+    }}
+
+    if (toShow) addAlert(toShow.msg, toShow.full, toShow.cls);
   }}
 
   var idx = startIdx;
