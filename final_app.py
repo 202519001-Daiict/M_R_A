@@ -707,6 +707,9 @@ def main():
     for k,v in defaults.items():
         if k not in st.session_state: st.session_state[k]=v
 
+    # Load early so sidebar stats can use actual path waypoints
+    _early_paths = load_driver_path()
+
     with st.sidebar:
         # ── CUSTOM SIDEBAR CSS ─────────────────────
         st.markdown("""
@@ -924,36 +927,39 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
         if _route_active:
             import math
 
-            def _dist_point_to_segment(plat, plng, alat, alng, blat, blng):
-                """Perpendicular distance in metres from point P to line segment A→B."""
-                # Convert to approximate metres using equirectangular
+            def _pt_seg_dist_m(plat, plng, alat, alng, blat, blng):
+                """Metres from point P to segment A→B using equirectangular approx."""
                 R = 6371000
-                clat = math.radians((alat + blat) / 2)
-                ax = math.radians(alng) * R * math.cos(clat)
-                ay = math.radians(alat) * R
-                bx = math.radians(blng) * R * math.cos(clat)
-                by = math.radians(blat) * R
-                px = math.radians(plng) * R * math.cos(clat)
-                py = math.radians(plat) * R
-                # Vector AB
-                abx, aby = bx - ax, by - ay
-                ab2 = abx*abx + aby*aby
-                if ab2 == 0:
-                    return math.hypot(px-ax, py-ay)
-                # Project P onto AB, clamp to [0,1]
-                t = max(0, min(1, ((px-ax)*abx + (py-ay)*aby) / ab2))
-                # Nearest point on segment
-                nx, ny = ax + t*abx, ay + t*aby
-                return math.hypot(px-nx, py-ny)
+                clat = math.cos(math.radians((alat+blat)/2))
+                ax = math.radians(alng)*R*clat; ay = math.radians(alat)*R
+                bx = math.radians(blng)*R*clat; by = math.radians(blat)*R
+                px = math.radians(plng)*R*clat; py = math.radians(plat)*R
+                abx,aby = bx-ax,by-ay
+                ab2 = abx*abx+aby*aby
+                if ab2==0: return math.hypot(px-ax,py-ay)
+                t = max(0,min(1,((px-ax)*abx+(py-ay)*aby)/ab2))
+                return math.hypot(px-(ax+t*abx), py-(ay+t*aby))
 
-            # Keep zones within 600m of the route line (matches APPROACH_R + buffer)
-            _CORRIDOR = 600
+            def _zone_on_path(zlat, zlng, path_coords, threshold=600):
+                """True if zone is within threshold metres of ANY segment of the path."""
+                for i in range(len(path_coords)-1):
+                    a,b = path_coords[i], path_coords[i+1]
+                    if _pt_seg_dist_m(zlat,zlng,a[0],a[1],b[0],b[1]) <= threshold:
+                        return True
+                return False
+
+            # Get actual driver path waypoints
+            _path_coords = []
+            for p in _early_paths:
+                _path_coords.extend(p.get("coordinates", []))
+
+            # Fallback: if no path coords, use straight line origin→dest
+            if len(_path_coords) < 2:
+                _path_coords = [_nav_o, _nav_d]
+
             _mask = _df_tmp.apply(
-                lambda r: _dist_point_to_segment(
-                    r["latitude"], r["longitude"],
-                    _nav_o[0], _nav_o[1],
-                    _nav_d[0], _nav_d[1]
-                ) <= _CORRIDOR, axis=1
+                lambda r: _zone_on_path(r["latitude"], r["longitude"], _path_coords),
+                axis=1
             )
             _stats_df = _df_tmp[_mask]
             _stats_label = "ON YOUR ROUTE"
