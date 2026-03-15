@@ -303,13 +303,94 @@ def build_leaflet_map(accident_df: pd.DataFrame,
   .sr-stats{{font-size:0.74rem;color:#9ab;margin-top:3px;}}
   .sr-stats b{{color:#cde;}}
   @keyframes fadeUp{{from{{opacity:0;transform:translateY(8px);}}to{{opacity:1;transform:translateY(0);}}}}
-  @keyframes pulse{{0%,100%{{transform:scale(1);opacity:1;}}50%{{transform:scale(1.6);opacity:0.6;}}}}
+  @keyframes pulse{{0%,100%{{transform:scale(1);opacity:1;}}50%{{transform:scale(1.6);opacity:0.6);}}}}
+
+  /* ── Google Maps–style layers button ── */
+  #layerBtn{{
+    position:absolute;bottom:90px;right:12px;z-index:1003;
+    width:44px;height:44px;border-radius:50%;
+    background:#fff;border:none;cursor:pointer;
+    box-shadow:0 2px 10px rgba(0,0,0,0.35);
+    display:flex;align-items:center;justify-content:center;
+    font-size:20px;transition:box-shadow 0.2s,transform 0.15s;
+  }}
+  #layerBtn:hover{{box-shadow:0 4px 16px rgba(0,0,0,0.45);transform:scale(1.05);}}
+  #layerBtn.active{{background:#e8f0fe;box-shadow:0 4px 16px rgba(66,133,244,0.45);}}
+
+  /* ── Layer picker panel ── */
+  #layerPanel{{
+    position:absolute;bottom:144px;right:12px;z-index:1003;
+    background:#fff;border-radius:14px;
+    box-shadow:0 4px 20px rgba(0,0,0,0.28);
+    width:200px;padding:12px 0 8px;
+    display:none;animation:fadeUp 0.2s ease;
+  }}
+  #layerPanel.open{{display:block;}}
+  #layerPanel .lp-title{{
+    font-size:0.68rem;font-weight:700;letter-spacing:.8px;
+    color:#5f6368;text-transform:uppercase;
+    padding:0 14px 8px;border-bottom:1px solid #f0f0f0;margin-bottom:4px;
+  }}
+  #layerPanel .lp-section{{padding:6px 14px 4px;font-size:0.7rem;color:#5f6368;font-weight:600;letter-spacing:.5px;}}
+  .lp-row{{
+    display:flex;align-items:center;gap:10px;padding:7px 14px;
+    cursor:pointer;transition:background 0.15s;border-radius:0;
+    font-size:0.82rem;color:#202124;font-weight:400;
+  }}
+  .lp-row:hover{{background:#f8f9fa;}}
+  .lp-row.selected{{background:#e8f0fe;color:#1a73e8;font-weight:600;}}
+  .lp-dot{{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;
+            justify-content:center;font-size:16px;flex-shrink:0;}}
+  .lp-radio{{width:16px;height:16px;border-radius:50%;border:2px solid #dadce0;
+              display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:auto;}}
+  .lp-radio.on{{border-color:#1a73e8;background:#1a73e8;}}
+  .lp-radio.on::after{{content:'';width:6px;height:6px;border-radius:50%;background:#fff;}}
+  .lp-check{{width:16px;height:16px;border-radius:3px;border:2px solid #dadce0;
+              display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:auto;font-size:10px;}}
+  .lp-check.on{{border-color:#1a73e8;background:#1a73e8;color:#fff;}}
+  .lp-divider{{height:1px;background:#f0f0f0;margin:4px 0;}}
 </style>
 </head>
 <body>
 <div id="wrapper">
   <div id="map">
     <div id="mapAlert"></div>
+    <!-- Google Maps–style layers button -->
+    <button id="layerBtn" onclick="toggleLayerPanel()" title="Map layers">🗺️</button>
+    <!-- Layer picker panel -->
+    <div id="layerPanel">
+      <div class="lp-title">Map Type</div>
+      <div id="lp-dark"     class="lp-row selected" onclick="setBase('dark')">
+        <div class="lp-dot" style="background:#2c3e50">🌑</div><span>Dark</span>
+        <div class="lp-radio on" id="r-dark"></div>
+      </div>
+      <div id="lp-light"    class="lp-row" onclick="setBase('light')">
+        <div class="lp-dot" style="background:#f5f5f5">☀️</div><span>Light</span>
+        <div class="lp-radio" id="r-light"></div>
+      </div>
+      <div id="lp-street"   class="lp-row" onclick="setBase('street')">
+        <div class="lp-dot" style="background:#e8f4ea">🗺️</div><span>Street</span>
+        <div class="lp-radio" id="r-street"></div>
+      </div>
+      <div id="lp-satellite" class="lp-row" onclick="setBase('satellite')">
+        <div class="lp-dot" style="background:#1a2a3a">🛰️</div><span>Satellite</span>
+        <div class="lp-radio" id="r-satellite"></div>
+      </div>
+      <div id="lp-topo"     class="lp-row" onclick="setBase('topo')">
+        <div class="lp-dot" style="background:#d4e6c3">🏔️</div><span>Topo</span>
+        <div class="lp-radio" id="r-topo"></div>
+      </div>
+      <div class="lp-divider"></div>
+      <div class="lp-title" style="padding-top:6px">Overlays</div>
+      <div class="lp-row" id="ov-zones" onclick="toggleOverlay('zones')">
+        <div class="lp-dot" style="background:#fdecea">🚨</div><span>Accident Zones</span>
+        <div class="lp-check on" id="c-zones">✓</div>
+      </div>
+      <div class="lp-row" id="ov-paths" onclick="toggleOverlay('paths')">
+        <div class="lp-dot" style="background:#e8f0fe">🛣️</div><span>Driver Paths</span>
+        <div class="lp-check on" id="c-paths">✓</div>
+      </div>
+    </div>
     <div id="srPanel">
       <div id="srHead">
         <h3 id="srTitle">📍 Search Results</h3>
@@ -510,16 +591,63 @@ if(HAS_SEARCH){{
   }}
 }}
 
-// ── LAYER CONTROL — 5 base maps + overlays ────
-L.control.layers(
-  {{'🌑 Dark':BL.dark,'☀️ Light':BL.light,'🗺️ Street':BL.street,'🛰️ Satellite':BL.satellite,'🏔️ Topo':BL.topo}},
-  {{'🚨 Accident Zones':zoneLayer,'🛣️ Driver Paths':pathLayer}},
-  {{collapsed:false,position:'topright'}}
-).addTo(map);
-map.on('baselayerchange',e=>{{
-  const k={{'🌑 Dark':'dark','☀️ Light':'light','🗺️ Street':'street','🛰️ Satellite':'satellite','🏔️ Topo':'topo'}}[e.name];
-  if(k)localStorage.setItem('riskmap_bl',k);
+// ── CUSTOM GOOGLE MAPS–STYLE LAYER CONTROL ────
+// Remove default Leaflet control — we have our own button
+var _currentBase = localStorage.getItem('riskmap_bl') || 'dark';
+var _zonesVisible = true;
+var _pathsVisible = true;
+
+function toggleLayerPanel() {{
+  var panel = document.getElementById('layerPanel');
+  var btn   = document.getElementById('layerBtn');
+  var open  = panel.classList.contains('open');
+  panel.classList.toggle('open', !open);
+  btn.classList.toggle('active', !open);
+}}
+
+// Close panel when clicking outside
+map.on('click', function() {{
+  document.getElementById('layerPanel').classList.remove('open');
+  document.getElementById('layerBtn').classList.remove('active');
 }});
+
+function setBase(name) {{
+  // Remove current base layer
+  Object.values(BL).forEach(function(l){{ if(map.hasLayer(l)) map.removeLayer(l); }});
+  BL[name].addTo(map);
+  _currentBase = name;
+  localStorage.setItem('riskmap_bl', name);
+  // Update UI
+  ['dark','light','street','satellite','topo'].forEach(function(k) {{
+    var row = document.getElementById('lp-'+k);
+    var rad = document.getElementById('r-'+k);
+    if(row) row.classList.toggle('selected', k===name);
+    if(rad) {{ rad.classList.toggle('on', k===name); }}
+  }});
+}}
+
+function toggleOverlay(which) {{
+  if(which==='zones') {{
+    _zonesVisible = !_zonesVisible;
+    _zonesVisible ? map.addLayer(zoneLayer) : map.removeLayer(zoneLayer);
+    var c = document.getElementById('c-zones');
+    var r = document.getElementById('ov-zones');
+    c.classList.toggle('on', _zonesVisible);
+    c.textContent = _zonesVisible ? '✓' : '';
+    r.classList.toggle('selected', _zonesVisible);
+  }} else {{
+    _pathsVisible = !_pathsVisible;
+    _pathsVisible ? map.addLayer(pathLayer) : map.removeLayer(pathLayer);
+    var c2 = document.getElementById('c-paths');
+    var r2 = document.getElementById('ov-paths');
+    c2.classList.toggle('on', _pathsVisible);
+    c2.textContent = _pathsVisible ? '✓' : '';
+    r2.classList.toggle('selected', _pathsVisible);
+  }}
+}}
+
+// Set initial base layer UI state
+setBase(_currentBase);
 
 // ── LEGEND ────────────────────────────────────
 const legend=L.control({{position:'bottomright'}});
