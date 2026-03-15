@@ -966,68 +966,48 @@ section[data-testid="stSidebar"] .stCheckbox label { color:#aab !important; font
 </div>
 """, unsafe_allow_html=True)
 
-        # ── ROUTE NAVIGATION (top — like Google Maps) ──
-        st.markdown("""
-<div style="padding:14px 16px 4px;font-size:0.7rem;font-weight:700;
-            letter-spacing:1px;color:#4285f4;text-transform:uppercase">
-  🧭 Route Navigation
-</div>
-""", unsafe_allow_html=True)
-
-        # Route input card
-        st.markdown("""
-<div style="margin:0 10px 8px;background:#141929;border:1px solid #1e2a3e;
-            border-radius:12px;overflow:hidden">
-  <div style="display:flex;align-items:center;padding:2px 10px 0;gap:8px">
-    <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;padding:6px 0">
-      <div style="width:11px;height:11px;border-radius:50%;background:#00c853;
-                  border:2px solid #fff;box-shadow:0 0 8px #00c85388"></div>
-      <div style="width:1.5px;height:20px;background:linear-gradient(#00c853,#d50000);margin:2px 0"></div>
-      <div style="width:11px;height:11px;border-radius:50%;background:#d50000;
-                  border:2px solid #fff;box-shadow:0 0 8px #d5000088"></div>
-    </div>
-    <div style="flex:1;min-width:0"></div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-        origin_input = st.text_input("Start", key="nav_origin_input",
+        # ── NAVIGATION INPUTS ─────────────────────────
+        origin_input = st.text_input("📍 Start", key="nav_origin_input",
             value=st.session_state.nav_origin,
-            placeholder="Choose starting point…")
-        dest_input = st.text_input("Destination", key="nav_dest_input",
+            placeholder="e.g. Jogeshwari, Mumbai")
+        dest_input = st.text_input("🏁 Destination", key="nav_dest_input",
             value=st.session_state.nav_dest,
-            placeholder="Choose destination…")
+            placeholder="e.g. Vikhroli, Mumbai")
 
         nc1, nc2 = st.columns([3,2])
         with nc1: nav_btn   = st.button("🗺️ Get Directions", use_container_width=True, type="primary")
         with nc2: nav_clear = st.button("✕ Clear", use_container_width=True)
 
-        # Active route card
         if st.session_state.nav_active:
             st.markdown(f"""
-<div style="margin:6px 0 2px;background:#0a1628;border:1px solid #1a3a6e;
+<div style="margin:4px 0 2px;background:#0a1628;border:1px solid #1a3a6e;
             border-radius:10px;padding:10px 14px;font-size:0.78rem">
-  <div style="color:#4285f4;font-weight:700;font-size:0.7rem;margin-bottom:6px;
-              letter-spacing:.5px">ACTIVE ROUTE</div>
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-    <div style="width:8px;height:8px;border-radius:50%;background:#00c853;flex-shrink:0"></div>
-    <div style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+  <div style="color:#4285f4;font-weight:700;font-size:0.68rem;margin-bottom:6px;
+              letter-spacing:.5px">✅ ACTIVE ROUTE</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <svg width="14" height="14" viewBox="0 0 14 14" style="flex-shrink:0">
+      <circle cx="7" cy="7" r="5.5" fill="#34a853" stroke="#fff" stroke-width="1.5"/>
+      <circle cx="7" cy="7" r="2.2" fill="#fff"/>
+    </svg>
+    <div style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:0.78rem">
       {st.session_state.nav_origin}</div>
   </div>
-  <div style="margin-left:3px;width:1px;height:10px;background:#1e3a5e;margin-bottom:5px;margin-left:11px"></div>
+  <div style="width:2px;height:10px;background:#1e3a5e;margin:0 0 4px 6px"></div>
   <div style="display:flex;align-items:center;gap:8px">
-    <div style="width:8px;height:8px;border-radius:50%;background:#d50000;flex-shrink:0"></div>
-    <div style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+    <svg width="14" height="17" viewBox="0 0 14 17" style="flex-shrink:0">
+      <path d="M7 1C4.24 1 2 3.24 2 6c0 3.75 5 10 5 10s5-6.25 5-10c0-2.76-2.24-5-5-5z"
+            fill="#ea4335" stroke="#fff" stroke-width="1.2"/>
+      <circle cx="7" cy="6" r="2" fill="#fff"/>
+    </svg>
+    <div style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:0.78rem">
       {st.session_state.nav_dest}</div>
   </div>
-</div>
-""", unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
         if st.session_state.nav_error:
             st.markdown(f"""
-<div style="margin:6px 0;background:#2a0a0a;border:1px solid #d5000044;border-radius:8px;
-            padding:8px 12px;font-size:0.75rem;color:#ff6b6b">
-  ⚠️ {st.session_state.nav_error}
+<div style="margin:4px 0;background:#2a0a0a;border:1px solid #d5000044;border-radius:8px;
+            padding:8px 12px;font-size:0.75rem;color:#ff6b6b">⚠️ {st.session_state.nav_error}
 </div>""", unsafe_allow_html=True)
 
         # ── DIVIDER ───────────────────────────────
