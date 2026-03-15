@@ -540,9 +540,45 @@ if (SHOW_CAR && PATHS.length > 0) {{
 
   var makeCarIcon = function() {{
     return L.divIcon({{
-      className:'car-icon',
-      html:'<span style="font-size:22px;line-height:1;display:block;filter:drop-shadow(0 0 6px #1e90ff);">🚗</span>',
-      iconSize:[24,24], iconAnchor:[12,12], popupAnchor:[0,-14]
+      className: 'car-icon',
+      html: `<div style="
+        position:relative;
+        width:38px;
+        height:46px;
+        filter:drop-shadow(0 3px 8px rgba(0,0,0,0.5));
+      ">
+        <!-- Location pin shape -->
+        <svg viewBox="0 0 38 46" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:38px;height:46px">
+          <!-- Pin shadow -->
+          <ellipse cx="19" cy="44" rx="6" ry="2.5" fill="rgba(0,0,0,0.25)"/>
+          <!-- Pin body gradient -->
+          <defs>
+            <radialGradient id="pinGrad" cx="38%" cy="32%" r="65%">
+              <stop offset="0%" stop-color="#4fc3f7"/>
+              <stop offset="100%" stop-color="#0277bd"/>
+            </radialGradient>
+          </defs>
+          <!-- Pin outline for depth -->
+          <path d="M19 2 C9.6 2 2 9.6 2 19 C2 29.5 19 44 19 44 C19 44 36 29.5 36 19 C36 9.6 28.4 2 19 2Z"
+                fill="url(#pinGrad)" stroke="#01579b" stroke-width="1.2"/>
+          <!-- White circle inside pin -->
+          <circle cx="19" cy="19" r="12" fill="white" opacity="0.95"/>
+        </svg>
+        <!-- Car SVG centered in pin -->
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"
+          style="position:absolute;top:7px;left:7px;width:24px;height:24px">
+          <path d="M5 11l1.5-4.5h11L19 11" stroke="#0277bd" stroke-width="1.2" fill="none"/>
+          <rect x="3" y="11" width="18" height="7" rx="2" fill="#0277bd"/>
+          <rect x="5" y="12.5" width="5" height="3.5" rx="1" fill="#e3f2fd"/>
+          <rect x="14" y="12.5" width="5" height="3.5" rx="1" fill="#e3f2fd"/>
+          <circle cx="7.5" cy="19.5" r="1.8" fill="#01579b" stroke="#e3f2fd" stroke-width="0.8"/>
+          <circle cx="16.5" cy="19.5" r="1.8" fill="#01579b" stroke="#e3f2fd" stroke-width="0.8"/>
+          <rect x="9" y="11" width="6" height="0.8" fill="#0277bd"/>
+        </svg>
+      </div>`,
+      iconSize:   [38, 46],
+      iconAnchor: [19, 44],
+      popupAnchor:[0, -44]
     }});
   }};
 
@@ -647,7 +683,19 @@ if (SHOW_CAR && PATHS.length > 0) {{
   var idx = startIdx;
   function step() {{
     if (idx >= ic.length) {{
-      car.setIcon(L.divIcon({{className:'car-icon',html:'<span style="font-size:22px;line-height:1;display:block;">🏁</span>',iconSize:[24,24],iconAnchor:[12,12]}}));
+      car.setIcon(L.divIcon({{
+        className:'car-icon',
+        html:`<div style="position:relative;width:38px;height:46px;filter:drop-shadow(0 3px 8px rgba(0,0,0,0.5))">
+          <svg viewBox="0 0 38 46" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:38px;height:46px">
+            <ellipse cx="19" cy="44" rx="6" ry="2.5" fill="rgba(0,0,0,0.25)"/>
+            <defs><radialGradient id="doneGrad" cx="38%" cy="32%" r="65%"><stop offset="0%" stop-color="#a5d6a7"/><stop offset="100%" stop-color="#2e7d32"/></radialGradient></defs>
+            <path d="M19 2 C9.6 2 2 9.6 2 19 C2 29.5 19 44 19 44 C19 44 36 29.5 36 19 C36 9.6 28.4 2 19 2Z" fill="url(#doneGrad)" stroke="#1b5e20" stroke-width="1.2"/>
+            <circle cx="19" cy="19" r="12" fill="white" opacity="0.95"/>
+            <text x="19" y="23.5" text-anchor="middle" font-size="14">🏁</text>
+          </svg>
+        </div>`,
+        iconSize:[38,46], iconAnchor:[19,44]
+      }}));
       addAlert('🏁 Done!','🏁 <b>Simulation complete — Destination reached!</b>','safe');
       localStorage.removeItem(LS_IDX); localStorage.removeItem(LS_TRAIL);
       return;
