@@ -1,0 +1,31 @@
+id,city,area,location,Accident_2021,Accident_2022,Accident_2023,Total_Accident,Total_fatality,latitude,longitude
+1,Mumbai,Andheri,Intersection of WEH and AGLE,8,1,10,19,2,19.11657,72.85518
+2,Mumbai,Bandra,Mahim Causeway Junction (Sea Link),6,13,15,34,5,19.04983,72.83821
+3,Mumbai,Bangur Nagar,"Mith Chowki, Malad West",3,5,9,17,0,19.19571,72.83377
+4,Mumbai,Byculla,Bameter Naka Marg Junction,7,4,6,17,6,18.97598,72.84433
+5,Mumbai,Deonar,Baiganwadi Signal Junction,14,10,13,37,10,19.05926,72.92386
+6,Mumbai,Deonar,Eastern Freeway Ã— GMLR,2,8,10,20,1,19.06325,72.91455
+7,Mumbai,Deonar,"GMLR, Mankhurd West",7,2,10,19,3,19.05667,72.92869
+8,Mumbai,Deonar,"GMLR, Govandi West",4,3,10,17,3,19.06083,72.92057
+9,Mumbai,Dindoshi,WEH near Pathanwadi,2,5,11,18,5,19.18097,72.85847
+10,Mumbai,Goregaon,WEH Ã— Ram Mandir Rd,8,8,5,21,4,19.15226,72.84458
+11,Mumbai,Jogeshwari,WEH Ã— JVLR,6,5,16,27,6,19.14059,72.85481
+12,Mumbai,Jogeshwari,Shankarwadi Bus Stop,7,4,7,18,7,19.12874,72.85523
+13,Mumbai,Kanjurmarg,EEH Ã— JVLR,12,7,10,29,12,19.12408,72.93862
+14,Mumbai,Kasturba,"SGNP Junction, Borivali E",6,6,10,22,8,19.2314,72.86337
+15,Mumbai,Kasturba,WEH near Metro Station,6,4,7,17,8,19.21698,72.86087
+16,Mumbai,Kherwadi,BKC Main Rd Junction,11,12,3,26,9,19.05282,72.84741
+17,Mumbai,Mahim,Lady Jamshedji Rd Ã— Cadell Rd,4,7,10,21,4,19.04283,72.84013
+18,Mumbai,Mankhurd,Sionâ€“Panvel Hwy Ã— GMLR,8,10,16,34,15,19.05119,72.93683
+19,Mumbai,Nehru Nagar,Priyadarshini Junction,11,2,7,20,7,19.05348,72.88236
+20,Mumbai,Nirmal Nagar,WEH Ã— Sionâ€“Bandra Link Rd,21,13,11,45,13,19.05415,72.84623
+21,Mumbai,Nirmal Nagar,Kherwadi Signal,10,10,10,30,7,19.05561,72.84649
+22,Mumbai,Pantnagar,Ghatkoparâ€“Andheri Link Rd Ã— EEH,8,4,4,16,7,19.08416,72.92102
+23,Mumbai,Shivaji Park,Veer Kotwal Udyan Chowk,8,5,6,19,3,19.02132,72.84239
+24,Mumbai,Sion,Sion Circle Junction,3,6,16,25,6,19.04264,72.86366
+25,Mumbai,Tilaknagar,Amar Mahal Junction,12,14,7,33,11,19.06541,72.89924
+26,Mumbai,Tilaknagar,Chedda Nagar Junction,6,3,13,22,4,19.07081,72.90732
+27,Mumbai,Vakola,WEH Ã— JN Road,11,14,13,38,5,19.08042,72.84688
+28,Mumbai,Vikhroli,"Godrej Signal, EEH",7,4,9,20,3,19.10245,72.92963
+29,Mumbai,Vikhroli,Godrej Boyce Bus Stop,6,4,7,17,1,19.10113,72.92931
+30,Mumbai,Vile Parle,WEH Ã— Nehru Road,8,1,11,20,3,19.09651,72.85306
